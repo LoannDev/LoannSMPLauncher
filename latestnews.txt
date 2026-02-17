@@ -1,1 +1,1 @@
-Launcher Rework
+LAUNCHER V3! Rework COMPLET de l'UI, ajout de gestion Mods et Shaders & QoL
