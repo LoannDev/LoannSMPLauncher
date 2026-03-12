@@ -1,1 +1,1 @@
-LAUNCHER V3! Rework COMPLET de l'UI, ajout de gestion Mods et Shaders & QoL
+Refonte de l'application en Java, ajout des onglets "Mods" et "Shaders" + Optimisations (et un anti-crash aussi)
