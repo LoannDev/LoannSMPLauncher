@@ -1,2 +1,4 @@
-# build command
-pyinstaller launcher.spec launcher.py
+# V3 
+
+**Tout a été converti en Java.**
+Build : `mvn clean package -q`
