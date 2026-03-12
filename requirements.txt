@@ -1,5 +1,0 @@
-requests
-minecraft-launcher-lib
-packaging
-psutil
-PySide6
