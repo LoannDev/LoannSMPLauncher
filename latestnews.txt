@@ -1,1 +1,1 @@
-Refonte de l'application en Java, ajout des onglets "Mods" et "Shaders" + Optimisations (et un anti-crash aussi)
+Suppression de l'onglet Stats + rework de la progressBar (montre vraiment le progrès cette fois)
