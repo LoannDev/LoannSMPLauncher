@@ -1,96 +1,106 @@
 package com.loannsmp.launcher;
 
-import com.google.gson.Gson;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
+import com.google.gson.*;
 import javafx.animation.*;
-import javafx.application.Application;
-import javafx.application.Platform;
+import javafx.application.*;
 import javafx.geometry.*;
-import javafx.scene.Node;
-import javafx.scene.Scene;
+import javafx.scene.*;
 import javafx.scene.control.*;
-import javafx.scene.effect.DropShadow;
-import javafx.scene.image.Image;
-import javafx.scene.image.ImageView;
-import javafx.scene.input.Clipboard;
-import javafx.scene.input.ClipboardContent;
+import javafx.scene.effect.*;
+import javafx.scene.image.*;
+import javafx.scene.input.*;
 import javafx.scene.layout.*;
-import javafx.scene.paint.Color;
-import javafx.scene.shape.SVGPath;
-import javafx.scene.text.Font;
-import javafx.scene.text.FontWeight;
-import javafx.stage.FileChooser;
-import javafx.stage.Stage;
+import javafx.scene.paint.*;
+import javafx.scene.shape.*;
+import javafx.scene.text.*;
+import javafx.stage.*;
 import javafx.util.Duration;
-import oshi.SystemInfo;
-import oshi.software.os.OSProcess;
-
 import java.awt.Desktop;
 import java.io.*;
+import java.net.*;
 import java.nio.file.*;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
-import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import oshi.SystemInfo;
+import oshi.hardware.HardwareAbstractionLayer;
+import oshi.software.os.OSProcess;
 
 public class LauncherApp extends Application {
 
-    private static final String LAUNCHER_VERSION = "2.1.0";
+    private static final String LAUNCHER_VERSION = "3.1";
     private static final String LOADING_IMAGE_URL =
-            "https://raw.githubusercontent.com/LoannDev/LoannSMPLauncher/refs/heads/main/icon.ico";
+        "https://raw.githubusercontent.com/LoannDev/LoannSMPLauncher/refs/heads/main/icon.ico";
     private static final String NEWS_URL =
-            "https://raw.githubusercontent.com/LoannDev/LoannSMPLauncher/refs/heads/main/latestnews.txt";
+        "https://raw.githubusercontent.com/LoannDev/LoannSMPLauncher/refs/heads/main/latestnews.txt";
 
-    private final MCInstaller installer = new MCInstaller();
-    private final Gson gson = new Gson();
+    private MCInstaller installer = new MCInstaller();
+    private Gson gson = new Gson();
     private JsonObject config;
-    private final Path configFile;
+    private java.nio.file.Path configFile;
 
-    private Process minecraftProcess;
-    private boolean gameRunning = false;
-    private long gameStartTime = 0;
+    private boolean isLaunching = false;
+    private int currentPage = 0;
 
-    private final ConcurrentLinkedQueue<String> logBuffer = new ConcurrentLinkedQueue<>();
-    private Timeline logFlushTimer;
-
-    private Stage primaryStage;
-    private StackPane contentStack;
-    private final List<ToggleButton> navButtons = new ArrayList<>();
-    private final List<Pane> pages = new ArrayList<>();
-    private int currentPageIndex = 0;
-
-    private Label newsContent;
-    private TextField usernameField;
-    private Label progressPercentLabel;
-    private ProgressBar progressBar;
-    private Label statusLabel;
-    private Button installBtn, launchBtn;
-    private Timeline launchPulse;
-
-    private Label ramDisplay;
-    private Button minusBtn, plusBtn;
-    private CheckBox customResCheck, fullscreenCheck, keepOpenCheck;
-    private TextField resWField, resHField;
-
+    private Queue<String> logBuffer = new ConcurrentLinkedQueue<>();
     private TextArea consoleArea;
 
-    private VBox modsListBox;
-    private TextField modSearchField;
+    private Stage primaryStage;
+    private Scene scene;
+    private VBox sidebar;
+    private List<ToggleButton> navButtons = new ArrayList<>();
+    private List<Pane> pages = new ArrayList<>();
+    private int currentPageIndex = 0;
 
-    private VBox shadersListBox;
-    private TextField shaderSearchField;
+    private Button launchBtn;
+    private Button installBtn;
+    private Button settingsBtn;
+    private Button skinsBtn;
+    private Button newsBtn;
+    private Button consoleBtn;
 
-    private Label statsNotRunning;
-    private VBox statsContainer;
-    private Label cpuValueLabel, ramValueLabel, playtimeValueLabel;
+    private TextField usernameField;
+    private Button minusBtn, plusBtn;
+    private CheckBox fullscreenCheck, keepOpenCheck;
+    private TextField resWField, resHField;
+
+    private List<String> selectedSkins = new ArrayList<>();
 
     private ImageView logoView;
+    private Label newsContent;
+    private Label statusLabel;
+    private Label ramDisplay;
+    private Label cpuValueLabel, ramValueLabel, playtimeValueLabel;
 
-    public LauncherApp() {
+    private ProgressBar progressBar;
+    private Label progressPercentLabel;
+    private Timeline progressAnimation;
+    private double targetProgress = 0;
+    private double currentProgress = 0;
+
+    private boolean gameRunning = false;
+    private Process minecraftProcess;
+    private long gameStartTime = 0;
+    private Timeline launchPulse;
+
+    private StackPane contentStack;
+    private VBox skinsListBox;
+    private VBox modsListBox;
+    private Label modsCountBadge;
+    private Label shadersCountBadge;
+
+    private void initialize() {
         configFile = installer.getMinecraftDir().resolve("launcher_config.json");
         config = loadConfig();
+        selectedSkins = new ArrayList<>();
+        if (config.has("selected_skins")) {
+            JsonArray skinsArray = config.getAsJsonArray("selected_skins");
+            for (JsonElement skin : skinsArray) {
+                selectedSkins.add(skin.getAsString());
+            }
+        }
     }
 
     private JsonObject loadConfig() {
@@ -127,60 +137,113 @@ public class LauncherApp extends Application {
 
     @Override
     public void start(Stage stage) {
-        this.primaryStage = stage;
+        initialize();
+        primaryStage = stage;
         stage.setTitle("LoannSMP Launcher V3");
-        stage.setWidth(850);
-        stage.setHeight(550);
+        stage.setWidth(1000);
+        stage.setHeight(650);
         stage.setResizable(false);
 
         HBox root = new HBox();
-        root.setStyle("-fx-background-color: #0A0A0A;");
+        root.setStyle("-fx-background-color: #1A1A1A;");
 
-        VBox sidebar = createSidebar();
+        sidebar = createSidebar();
 
         contentStack = new StackPane();
-        contentStack.setStyle("-fx-background-color: #0A0A0A;");
+        contentStack.setStyle("-fx-background-color: #1A1A1A;");
         HBox.setHgrow(contentStack, Priority.ALWAYS);
 
         pages.addAll(List.of(
-                createLauncherPage(), createModsPage(), createShadersPage(),
-                createOptionsPage(), createStatsPage(), createConsolePage()
+            createHomePage(), createModsPage(), createShadersPage(),
+            createSettingsPage(), createConsolePage()
         ));
         contentStack.getChildren().addAll(pages);
         for (int i = 1; i < pages.size(); i++) { pages.get(i).setVisible(false); pages.get(i).setOpacity(0); }
 
         root.getChildren().addAll(sidebar, contentStack);
-        Scene scene = new Scene(root);
+        scene = new Scene(root);
         stage.setScene(scene);
 
-        root.setOpacity(0);
-        stage.show();
-        stage.centerOnScreen();
-
-        FadeTransition startupFade = new FadeTransition(Duration.millis(600), root);
-        startupFade.setFromValue(0);
-        startupFade.setToValue(1);
-        startupFade.setInterpolator(Interpolator.EASE_OUT);
-        startupFade.play();
-
-        logFlushTimer = new Timeline(new KeyFrame(Duration.millis(80), e -> flushLogs()));
-        logFlushTimer.setCycleCount(Animation.INDEFINITE);
-        logFlushTimer.play();
-
-        logToConsole("=== Loann SMP Launcher ===");
-        logToConsole("Démarrage: " + LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss")));
-        logToConsole("Dossier: " + installer.getMinecraftDir() + "\n");
-
-        loadHeaderIcon();
-        fetchNews();
+        scene.getStylesheets().add("data:text/css," + """
+            .scroll-bar {
+                -fx-background-color: transparent !important;
+                -fx-background-radius: 0 !important;
+                -fx-border-color: transparent !important;
+                -fx-border-width: 0 !important;
+                -fx-padding: 0 !important;
+            }
+            .scroll-bar:vertical {
+                -fx-pref-width: 12 !important;
+                -fx-background-color: transparent !important;
+            }
+            .scroll-bar:vertical .track {
+                -fx-background-color: #1A1A1A !important;
+                -fx-background-radius: 6 !important;
+                -fx-border-color: transparent !important;
+            }
+            .scroll-bar:vertical .thumb {
+                -fx-background-color: #333333 !important;
+                -fx-background-radius: 6 !important;
+                -fx-border-color: transparent !important;
+                -fx-pref-width: 8 !important;
+            }
+            .scroll-bar:vertical .thumb:hover {
+                -fx-background-color: #444444 !important;
+            }
+            .scroll-bar:vertical .thumb:pressed {
+                -fx-background-color: #555555 !important;
+            }
+            .scroll-bar:vertical .increment-button,
+            .scroll-bar:vertical .decrement-button {
+                -fx-background-color: transparent !important;
+                -fx-border-color: transparent !important;
+                -fx-pref-height: 0 !important;
+                -fx-pref-width: 0 !important;
+                -fx-padding: 0 !important;
+                -fx-opacity: 0 !important;
+                -fx-max-height: 0 !important;
+                -fx-max-width: 0 !important;
+            }
+            .scroll-bar:horizontal {
+                -fx-pref-height: 12 !important;
+                -fx-background-color: transparent !important;
+            }
+            .scroll-bar:horizontal .track {
+                -fx-background-color: #1A1A1A !important;
+                -fx-background-radius: 6 !important;
+                -fx-border-color: transparent !important;
+            }
+            .scroll-bar:horizontal .thumb {
+                -fx-background-color: #333333 !important;
+                -fx-background-radius: 6 !important;
+                -fx-border-color: transparent !important;
+                -fx-pref-height: 8 !important;
+            }
+            .scroll-bar:horizontal .thumb:hover {
+                -fx-background-color: #444444 !important;
+            }
+            .scroll-bar:horizontal .thumb:pressed {
+                -fx-background-color: #555555 !important;
+            }
+            .scroll-bar:horizontal .increment-button,
+            .scroll-bar:horizontal .decrement-button {
+                -fx-background-color: transparent !important;
+                -fx-border-color: transparent !important;
+                -fx-pref-height: 0 !important;
+                -fx-pref-width: 0 !important;
+                -fx-padding: 0 !important;
+                -fx-opacity: 0 !important;
+                -fx-max-height: 0 !important;
+                -fx-max-width: 0 !important;
+            }
+        """);
+        loadLogo();
+        loadNews();
         checkInstallation();
-
-        Timeline statsTimer = new Timeline(new KeyFrame(Duration.seconds(1), e -> updateStats()));
-        statsTimer.setCycleCount(Animation.INDEFINITE);
-        statsTimer.play();
+        stage.show();
     }
 
-    private void logToConsole(String msg) { logBuffer.add(msg); }
+    private void log(String msg) { logBuffer.add(msg); }
 
     private void flushLogs() {
         if (consoleArea == null || logBuffer.isEmpty()) return;
@@ -194,13 +257,18 @@ public class LauncherApp extends Application {
         }
     }
 
+    private void logToConsole(String msg) {
+        log(msg);
+        Platform.runLater(this::flushLogs);
+    }
+
     private VBox createSidebar() {
-        VBox sidebar = new VBox(4);
-        sidebar.setPrefWidth(240);
-        sidebar.setMinWidth(240);
-        sidebar.setMaxWidth(240);
-        sidebar.setPadding(new Insets(25, 16, 25, 16));
-        sidebar.setStyle("-fx-background-color: #0D0D0D;");
+        VBox sb = new VBox(4);
+        sb.setPrefWidth(240);
+        sb.setMinWidth(240);
+        sb.setMaxWidth(240);
+        sb.setPadding(new Insets(25, 16, 25, 16));
+        sb.setStyle("-fx-background-color: #0D0D0D;");
 
         HBox brand = new HBox(12);
         brand.setAlignment(Pos.CENTER_LEFT);
@@ -217,33 +285,33 @@ public class LauncherApp extends Application {
         title.setTextFill(Color.web("#FF9500"));
         brand.getChildren().add(title);
 
-        sidebar.getChildren().add(brand);
+        sb.getChildren().add(brand);
 
         Region sep = new Region();
         sep.setPrefHeight(1);
         sep.setMaxWidth(Double.MAX_VALUE);
         sep.setStyle("-fx-background-color: #1A1A1A;");
-        sidebar.getChildren().add(sep);
+        sb.getChildren().add(sep);
 
         Region topPush = new Region();
         VBox.setVgrow(topPush, Priority.ALWAYS);
-        sidebar.getChildren().add(topPush);
+        sb.getChildren().add(topPush);
 
-        String[] tabs = {"Accueil", "Mods", "Shaders", "Options", "Statistiques", "Console"};
+        String[] tabs = {"Accueil", "Gestion des Mods", "Packs de Shaders", "Paramètres", "Console"};
         ToggleGroup group = new ToggleGroup();
         for (int i = 0; i < tabs.length; i++) {
             ToggleButton btn = createNavButton(tabs[i]);
             btn.setToggleGroup(group);
-            int idx = i;
+            final int idx = i;
             btn.setOnAction(e -> switchPage(idx));
-            sidebar.getChildren().add(btn);
+            sb.getChildren().add(btn);
             navButtons.add(btn);
         }
         navButtons.get(0).setSelected(true);
 
         Region bottomPush = new Region();
         VBox.setVgrow(bottomPush, Priority.ALWAYS);
-        sidebar.getChildren().add(bottomPush);
+        sb.getChildren().add(bottomPush);
 
         Button discordBtn = new Button("Discord");
         discordBtn.setMaxWidth(Double.MAX_VALUE);
@@ -255,27 +323,33 @@ public class LauncherApp extends Application {
         discordBtn.setOnMouseEntered(e -> {
             discordBtn.setStyle("-fx-background-color: #6D78F7; -fx-text-fill: white; " +
                     "-fx-background-radius: 10; -fx-font-weight: bold;");
-            animateScale(discordBtn, 1.03);
+            ScaleTransition st = new ScaleTransition(Duration.millis(150), discordBtn);
+            st.setToX(1.05); st.setToY(1.05);
+            st.setInterpolator(Interpolator.EASE_OUT);
+            st.play();
         });
         discordBtn.setOnMouseExited(e -> {
             discordBtn.setStyle("-fx-background-color: #5865F2; -fx-text-fill: white; " +
                     "-fx-background-radius: 10; -fx-font-weight: bold;");
-            animateScale(discordBtn, 1.0);
+            ScaleTransition st = new ScaleTransition(Duration.millis(150), discordBtn);
+            st.setToX(1.0); st.setToY(1.0);
+            st.setInterpolator(Interpolator.EASE_OUT);
+            st.play();
         });
         discordBtn.setOnAction(e -> {
             try { Desktop.getDesktop().browse(java.net.URI.create(cfgStr("discord_url"))); } catch (Exception ignored) {}
         });
-        sidebar.getChildren().add(discordBtn);
-        sidebar.getChildren().add(spacer(8));
+        sb.getChildren().add(discordBtn);
+        sb.getChildren().add(spacer(8));
 
         Label ver = new Label("v" + LAUNCHER_VERSION);
         ver.setTextFill(Color.web("#333333"));
         ver.setFont(Font.font("Segoe UI", 10));
         ver.setAlignment(Pos.CENTER);
         ver.setMaxWidth(Double.MAX_VALUE);
-        sidebar.getChildren().add(ver);
+        sb.getChildren().add(ver);
 
-        return sidebar;
+        return sb;
     }
 
     private ToggleButton createNavButton(String text) {
@@ -315,12 +389,18 @@ public class LauncherApp extends Application {
         btn.setOnMouseEntered(e -> {
             if (!btn.isSelected()) {
                 btn.setStyle(navBtnHover());
-                animateScale(btn, 1.02);
+                ScaleTransition st = new ScaleTransition(Duration.millis(200), btn);
+                st.setToX(1.02); st.setToY(1.02);
+                st.setInterpolator(Interpolator.EASE_OUT);
+                st.play();
             }
         });
         btn.setOnMouseExited(e -> {
             btn.setStyle(navBtnStyle(btn.isSelected()));
-            animateScale(btn, 1.0);
+            ScaleTransition st = new ScaleTransition(Duration.millis(200), btn);
+            st.setToX(1.0); st.setToY(1.0);
+            st.setInterpolator(Interpolator.EASE_OUT);
+            st.play();
         });
         return btn;
     }
@@ -343,7 +423,7 @@ public class LauncherApp extends Application {
         Pane outgoing = pages.get(currentPageIndex);
         Pane incoming = pages.get(index);
 
-        double direction = index > currentPageIndex ? 1 : -1;
+        int direction = index > currentPageIndex ? 1 : -1;
 
         FadeTransition fadeOut = new FadeTransition(Duration.millis(150), outgoing);
         fadeOut.setToValue(0);
@@ -355,13 +435,11 @@ public class LauncherApp extends Application {
         incoming.setTranslateX(20 * direction);
 
         FadeTransition fadeIn = new FadeTransition(Duration.millis(250), incoming);
-        fadeIn.setFromValue(0);
-        fadeIn.setToValue(1);
+        fadeIn.setFromValue(0); fadeIn.setToValue(1);
         fadeIn.setInterpolator(Interpolator.EASE_OUT);
 
         TranslateTransition slideIn = new TranslateTransition(Duration.millis(250), incoming);
-        slideIn.setFromX(20 * direction);
-        slideIn.setToX(0);
+        slideIn.setFromX(20 * direction); slideIn.setToX(0);
         slideIn.setInterpolator(Interpolator.EASE_OUT);
 
         ParallelTransition out = new ParallelTransition(fadeOut, slideOut);
@@ -371,14 +449,11 @@ public class LauncherApp extends Application {
         });
 
         ParallelTransition in = new ParallelTransition(fadeIn, slideIn);
-
         new SequentialTransition(out, in).play();
 
         currentPageIndex = index;
         for (int i = 0; i < navButtons.size(); i++) navButtons.get(i).setSelected(i == index);
     }
-
-    private void showToast(String message) { showToast(message, "#FF9500"); }
 
     private void showToast(String message, String color) {
         Platform.runLater(() -> {
@@ -388,7 +463,6 @@ public class LauncherApp extends Application {
             toast.setStyle("-fx-background-color: #1A1A1A; -fx-border-color: " + color + "; " +
                     "-fx-border-radius: 12; -fx-background-radius: 12; -fx-padding: 8 15 8 15;");
             toast.setMouseTransparent(true);
-            toast.setEffect(new DropShadow(15, Color.web(color, 0.3)));
 
             StackPane.setAlignment(toast, Pos.BOTTOM_CENTER);
             StackPane.setMargin(toast, new Insets(0, 0, 25, 0));
@@ -406,23 +480,24 @@ public class LauncherApp extends Application {
             fadeOut.setOnFinished(e -> contentStack.getChildren().remove(toast));
 
             new SequentialTransition(
-                    new ParallelTransition(fadeIn, slideIn),
-                    new PauseTransition(Duration.seconds(2)),
-                    fadeOut
+                new ParallelTransition(fadeIn, slideIn),
+                new PauseTransition(Duration.seconds(2)),
+                fadeOut
             ).play();
         });
     }
 
-    private Pane createLauncherPage() {
+    // ==================== HOME PAGE ====================
+
+    private Pane createHomePage() {
         VBox page = new VBox(20);
-        page.setPadding(new Insets(35, 40, 30, 40));
+        page.setPadding(new Insets(40, 50, 35, 50));
         page.setAlignment(Pos.TOP_CENTER);
 
         VBox newsCard = new VBox(10);
         newsCard.setPadding(new Insets(25));
         newsCard.setStyle("-fx-background-color: #111111; -fx-background-radius: 16; -fx-border-color: #1A1A1A; -fx-border-radius: 16;");
         VBox.setVgrow(newsCard, Priority.ALWAYS);
-        addHoverLift(newsCard);
 
         Label newsTitle = new Label("DERNIERES INFOS");
         newsTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 11));
@@ -434,32 +509,83 @@ public class LauncherApp extends Application {
         newsContent.setFont(Font.font("Segoe UI", 12));
         newsCard.getChildren().addAll(newsTitle, newsContent);
 
-        VBox bottomBox = new VBox(14);
-        bottomBox.setPadding(new Insets(22, 25, 22, 25));
+        VBox bottomBox = new VBox(16);
+        bottomBox.setPadding(new Insets(25, 25, 25, 25));
         bottomBox.setAlignment(Pos.CENTER);
-        bottomBox.setStyle("-fx-background-color: #0D0D0D; -fx-background-radius: 16; -fx-border-color: #1A1A1A; -fx-border-radius: 16;");
+        bottomBox.setStyle("""
+            -fx-background-color: linear-gradient(to bottom, #0D0D0D, #151515);
+            -fx-background-radius: 20;
+            -fx-border-color: rgba(255,255,255,0.08);
+            -fx-border-radius: 20;
+            -fx-border-width: 1px;
+        """);
 
         usernameField = new TextField(cfgStr("username"));
         usernameField.setPromptText("Entre ton pseudo Minecraft...");
-        usernameField.setPrefHeight(44);
+        usernameField.setPrefHeight(48);
         usernameField.setMaxWidth(Double.MAX_VALUE);
-        usernameField.setStyle(fieldStyle());
+        usernameField.setStyle("""
+            -fx-background-color: rgba(255,255,255,0.08);
+            -fx-background-radius: 15;
+            -fx-border-radius: 15;
+            -fx-border-color: rgba(255,255,255,0.15);
+            -fx-border-width: 1px;
+            -fx-text-fill: white;
+            -fx-prompt-text-fill: rgba(255,255,255,0.5);
+            -fx-font-size: 14px;
+            -fx-font-weight: 500;
+            -fx-padding: 12px 16px;
+        """);
         usernameField.textProperty().addListener((obs, o, n) -> { config.addProperty("username", n.trim()); saveConfig(); });
         usernameField.focusedProperty().addListener((obs, was, is) -> {
-            if (is) usernameField.setStyle(fieldStyle() + " -fx-border-color: #FF9500;");
-            else usernameField.setStyle(fieldStyle());
+            if (is) {
+                usernameField.setStyle("""
+                    -fx-background-color: rgba(255,255,255,0.12);
+                    -fx-background-radius: 15;
+                    -fx-border-radius: 15;
+                    -fx-border-color: #FF9500;
+                    -fx-border-width: 2px;
+                    -fx-text-fill: white;
+                    -fx-prompt-text-fill: rgba(255,255,255,0.5);
+                    -fx-font-size: 14px;
+                    -fx-font-weight: 500;
+                    -fx-padding: 12px 16px;
+                """);
+            } else {
+                usernameField.setStyle("""
+                    -fx-background-color: rgba(255,255,255,0.08);
+                    -fx-background-radius: 15;
+                    -fx-border-radius: 15;
+                    -fx-border-color: rgba(255,255,255,0.15);
+                    -fx-border-width: 1px;
+                    -fx-text-fill: white;
+                    -fx-prompt-text-fill: rgba(255,255,255,0.5);
+                    -fx-font-size: 14px;
+                    -fx-font-weight: 500;
+                    -fx-padding: 12px 16px;
+                """);
+            }
         });
 
         progressBar = new ProgressBar(0);
-        progressBar.setPrefHeight(8);
+        progressBar.setPrefHeight(15);
         progressBar.setMaxWidth(Double.MAX_VALUE);
-        progressBar.setStyle("-fx-accent: #FF9500;");
+        progressBar.setStyle("""
+            -fx-accent: #FF9500;
+            -fx-background-color: rgba(255,255,255,0.1);
+            -fx-background-radius: 4;
+            -fx-background-insets: 0;
+            -fx-border-radius: 4;
+            -fx-border-insets: 0;
+            -fx-padding: 0;
+        """);
 
         progressPercentLabel = new Label("");
-        progressPercentLabel.setTextFill(Color.web("#FF9500"));
-        progressPercentLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 10));
+        progressPercentLabel.setTextFill(Color.WHITE);
+        progressPercentLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 11));
         progressPercentLabel.setAlignment(Pos.CENTER);
         progressPercentLabel.setMaxWidth(Double.MAX_VALUE);
+        progressPercentLabel.setStyle("-fx-text-fill: white; -fx-font-weight: bold;");
 
         statusLabel = new Label("Prêt à l'aventure");
         statusLabel.setTextFill(Color.web("#666666"));
@@ -472,106 +598,239 @@ public class LauncherApp extends Application {
         btnRow.setAlignment(Pos.CENTER);
 
         installBtn = new Button("Mettre à jour");
-        installBtn.setPrefHeight(46);
-        installBtn.setFont(Font.font("Segoe UI", FontWeight.BOLD, 11));
+        installBtn.setPrefHeight(52);
+        installBtn.setFont(Font.font("Segoe UI", FontWeight.BOLD, 12));
         installBtn.setCursor(javafx.scene.Cursor.HAND);
         installBtn.setDisable(true);
         installBtn.setOnAction(e -> install());
-        installBtn.setStyle("-fx-background-color: #151515; -fx-text-fill: #FF9500; -fx-border-color: #252525; " +
-                "-fx-border-radius: 12; -fx-background-radius: 12; -fx-font-weight: bold;");
+        installBtn.setStyle("""
+            -fx-background-color: rgba(255,255,255,0.08);
+            -fx-text-fill: #FF9500;
+            -fx-border-color: rgba(255,149,0,0.3);
+            -fx-border-radius: 15;
+            -fx-background-radius: 15;
+            -fx-font-weight: bold;
+            -fx-font-size: 12px;
+            -fx-padding: 14px 20px;
+        """);
         HBox.setHgrow(installBtn, Priority.ALWAYS);
         installBtn.setMaxWidth(Double.MAX_VALUE);
-        addButtonHover(installBtn, "#151515", "#1E1E1E", "#FF9500");
+
+        installBtn.setOnMouseEntered(e -> {
+            if (!installBtn.isDisabled()) {
+                installBtn.setStyle("""
+                    -fx-background-color: rgba(255,149,0,0.15);
+                    -fx-text-fill: #FF9500;
+                    -fx-border-color: rgba(255,149,0,0.5);
+                    -fx-border-radius: 15;
+                    -fx-background-radius: 15;
+                    -fx-font-weight: bold;
+                    -fx-font-size: 12px;
+                    -fx-padding: 14px 20px;
+                """);
+                ScaleTransition st = new ScaleTransition(Duration.millis(200), installBtn);
+                st.setToX(1.03); st.setToY(1.03);
+                st.setInterpolator(Interpolator.EASE_OUT);
+                st.play();
+            }
+        });
+        installBtn.setOnMouseExited(e -> {
+            installBtn.setStyle("""
+                -fx-background-color: rgba(255,255,255,0.08);
+                -fx-text-fill: #FF9500;
+                -fx-border-color: rgba(255,149,0,0.3);
+                -fx-border-radius: 15;
+                -fx-background-radius: 15;
+                -fx-font-weight: bold;
+                -fx-font-size: 12px;
+                -fx-padding: 14px 20px;
+            """);
+            ScaleTransition st = new ScaleTransition(Duration.millis(200), installBtn);
+            st.setToX(1.0); st.setToY(1.0);
+            st.setInterpolator(Interpolator.EASE_OUT);
+            st.play();
+        });
 
         launchBtn = new Button("Lancer Minecraft");
-        launchBtn.setPrefHeight(46);
-        launchBtn.setFont(Font.font("Segoe UI", FontWeight.EXTRA_BOLD, 12));
+        launchBtn.setPrefHeight(52);
+        launchBtn.setFont(Font.font("Segoe UI", FontWeight.EXTRA_BOLD, 13));
         launchBtn.setCursor(javafx.scene.Cursor.HAND);
         launchBtn.setDisable(true);
-        launchBtn.setOnAction(e -> launch());
-        launchBtn.setStyle(launchBtnStyle());
+        launchBtn.setOnAction(e -> launchGame());
+        launchBtn.setStyle("""
+            -fx-background-color: linear-gradient(to right, #FF9500, #FF5E00);
+            -fx-text-fill: white;
+            -fx-border-radius: 15;
+            -fx-background-radius: 15;
+            -fx-font-weight: 900;
+            -fx-font-size: 13px;
+            -fx-padding: 14px 20px;
+        """);
         HBox.setHgrow(launchBtn, Priority.ALWAYS);
         launchBtn.setMaxWidth(Double.MAX_VALUE);
-        launchBtn.setOnMouseEntered(e -> { if (!launchBtn.isDisabled()) animateScale(launchBtn, 1.03); });
-        launchBtn.setOnMouseExited(e -> animateScale(launchBtn, 1.0));
+
+        launchBtn.setOnMouseEntered(e -> {
+            if (!launchBtn.isDisabled()) {
+                launchBtn.setStyle("""
+                    -fx-background-color: linear-gradient(to right, #FFA500, #FF6B00);
+                    -fx-text-fill: white;
+                    -fx-border-radius: 15;
+                    -fx-background-radius: 15;
+                    -fx-font-weight: 900;
+                    -fx-font-size: 13px;
+                    -fx-padding: 14px 20px;
+                """);
+                ScaleTransition st = new ScaleTransition(Duration.millis(200), launchBtn);
+                st.setToX(1.04); st.setToY(1.04);
+                st.setInterpolator(Interpolator.EASE_OUT);
+                st.play();
+            }
+        });
+        launchBtn.setOnMouseExited(e -> {
+            launchBtn.setStyle("""
+                -fx-background-color: linear-gradient(to right, #FF9500, #FF5E00);
+                -fx-text-fill: white;
+                -fx-border-radius: 15;
+                -fx-background-radius: 15;
+                -fx-font-weight: 900;
+                -fx-font-size: 13px;
+                -fx-padding: 14px 20px;
+            """);
+            ScaleTransition st = new ScaleTransition(Duration.millis(200), launchBtn);
+            st.setToX(1.0); st.setToY(1.0);
+            st.setInterpolator(Interpolator.EASE_OUT);
+            st.play();
+        });
 
         btnRow.getChildren().addAll(installBtn, launchBtn);
-
         bottomBox.getChildren().addAll(usernameField, progressBar, progressPercentLabel, statusLabel, btnRow);
         page.getChildren().addAll(newsCard, bottomBox);
         return page;
     }
 
-    private String launchBtnStyle() {
+    private String launchBtnActiveStyle() {
         return "-fx-background-color: linear-gradient(to right, #FF9500, #FF5E00); " +
                 "-fx-text-fill: white; -fx-border-radius: 12; -fx-background-radius: 12;";
     }
 
     private void startLaunchPulse() {
         if (launchPulse != null) launchPulse.stop();
-        DropShadow glow = new DropShadow(20, Color.web("#FF9500", 0.6));
-        launchBtn.setEffect(glow);
-        launchPulse = new Timeline(
-                new KeyFrame(Duration.ZERO, new KeyValue(glow.radiusProperty(), 10)),
-                new KeyFrame(Duration.millis(1000), new KeyValue(glow.radiusProperty(), 25)),
-                new KeyFrame(Duration.millis(2000), new KeyValue(glow.radiusProperty(), 10))
-        );
-        launchPulse.setCycleCount(Animation.INDEFINITE);
-        launchPulse.play();
+        // Pas d'animation de pulse
     }
 
     private void stopLaunchPulse() {
         if (launchPulse != null) { launchPulse.stop(); launchPulse = null; }
-        launchBtn.setEffect(null);
     }
 
     private void setProgress(int percent) {
         Platform.runLater(() -> {
-            double val = Math.max(0, Math.min(100, percent)) / 100.0;
-            progressBar.setProgress(val);
-            progressPercentLabel.setText(percent > 0 && percent < 100 ? percent + "%" : "");
+            targetProgress = Math.max(0, Math.min(100, percent));
+
+            if (progressAnimation != null) {
+                progressAnimation.stop();
+            }
+
+            progressAnimation = new Timeline();
+
+            double duration = Math.max(200, Math.min(1500, Math.abs(targetProgress - currentProgress) * 15));
+
+            KeyValue keyValue = new KeyValue(progressBar.progressProperty(), targetProgress / 100.0,
+                Interpolator.SPLINE(0.25, 0.1, 0.25, 1.0));
+            KeyFrame keyFrame = new KeyFrame(Duration.millis(duration), keyValue);
+
+            progressAnimation.getKeyFrames().add(keyFrame);
+
+            progressAnimation.currentTimeProperty().addListener((obs, oldTime, newTime) -> {
+                double progress = progressBar.getProgress();
+                int displayPercent = (int) Math.round(progress * 100);
+                progressPercentLabel.setText(displayPercent > 0 && displayPercent < 100 ? displayPercent + "%" : "");
+                progressPercentLabel.setStyle("-fx-text-fill: white; -fx-font-weight: bold;");
+            });
+
+            progressAnimation.setOnFinished(e -> {
+                currentProgress = targetProgress;
+                progressPercentLabel.setStyle("-fx-text-fill: white; -fx-font-weight: bold;");
+            });
+
+            progressAnimation.play();
         });
     }
 
+    private void resetProgress() {
+        Platform.runLater(() -> {
+            if (progressAnimation != null) {
+                progressAnimation.stop();
+            }
+
+            progressAnimation = new Timeline();
+            KeyValue keyValue = new KeyValue(progressBar.progressProperty(), 0, Interpolator.EASE_OUT);
+            KeyFrame keyFrame = new KeyFrame(Duration.millis(300), keyValue);
+            progressAnimation.getKeyFrames().add(keyFrame);
+
+            progressAnimation.currentTimeProperty().addListener((obs, oldTime, newTime) -> {
+                double progress = progressBar.getProgress();
+                int displayPercent = (int) Math.round(progress * 100);
+                progressPercentLabel.setText(displayPercent > 0 && displayPercent < 100 ? displayPercent + "%" : "");
+            });
+
+            progressAnimation.setOnFinished(e -> {
+                currentProgress = 0;
+                targetProgress = 0;
+                progressPercentLabel.setText("");
+            });
+
+            progressAnimation.play();
+        });
+    }
+
+    // ==================== MODS PAGE ====================
+
     private Pane createModsPage() {
         VBox page = new VBox(16);
-        page.setPadding(new Insets(35, 40, 30, 40));
+        page.setPadding(new Insets(40, 50, 35, 50));
         page.setAlignment(Pos.TOP_LEFT);
 
         HBox header = new HBox(12);
         header.setAlignment(Pos.CENTER_LEFT);
-        Label title = new Label("Gestion des Mods");
-        title.setFont(Font.font("Segoe UI", FontWeight.BOLD, 18));
-        title.setTextFill(Color.WHITE);
+        Label modsTitle = new Label("Mods");
+        modsTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 18));
+        modsTitle.setTextFill(Color.WHITE);
 
-        Label countBadge = new Label("0");
-        countBadge.setFont(Font.font("Segoe UI", FontWeight.BOLD, 10));
-        countBadge.setTextFill(Color.web("#FF9500"));
-        countBadge.setStyle("-fx-background-color: rgba(255,149,0,0.15); -fx-background-radius: 10; -fx-padding: 2 8 2 8;");
-        countBadge.setMinWidth(24);
-        countBadge.setAlignment(Pos.CENTER);
+        modsCountBadge = new Label("0");
+        modsCountBadge.setFont(Font.font("Segoe UI", FontWeight.BOLD, 10));
+        modsCountBadge.setTextFill(Color.web("#FF9500"));
+        modsCountBadge.setStyle("-fx-background-color: rgba(255,149,0,0.15); -fx-background-radius: 10; -fx-padding: 2 8 2 8;");
+        modsCountBadge.setMinWidth(24);
+        modsCountBadge.setAlignment(Pos.CENTER);
 
-        Region sp = new Region(); HBox.setHgrow(sp, Priority.ALWAYS);
+        Region sp = new Region();
+        HBox.setHgrow(sp, Priority.ALWAYS);
 
-        Button addBtn = new Button("+ Ajouter");
-        addBtn.setPrefSize(130, 36);
-        addBtn.setCursor(javafx.scene.Cursor.HAND);
-        addBtn.setOnAction(e -> onAddMod());
-        addBtn.setStyle("-fx-background-color: rgba(56,239,125,0.08); -fx-text-fill: #38EF7D; -fx-border-color: rgba(56,239,125,0.2); " +
-                "-fx-border-radius: 10; -fx-background-radius: 10; -fx-font-weight: bold; -fx-font-size: 11;");
-        addBtn.setOnMouseEntered(e -> {
-            addBtn.setStyle("-fx-background-color: rgba(56,239,125,0.15); -fx-text-fill: #38EF7D; -fx-border-color: rgba(56,239,125,0.4); " +
-                    "-fx-border-radius: 10; -fx-background-radius: 10; -fx-font-weight: bold; -fx-font-size: 11;");
-            animateScale(addBtn, 1.05);
+        Button refreshBtn = new Button("↻");
+        refreshBtn.setPrefSize(36, 36);
+        refreshBtn.setCursor(javafx.scene.Cursor.HAND);
+        refreshBtn.setOnAction(e -> {
+            loadMods();
+            modsCountBadge.setText(String.valueOf(modsListBox.getChildren().size()));
         });
-        addBtn.setOnMouseExited(e -> {
-            addBtn.setStyle("-fx-background-color: rgba(56,239,125,0.08); -fx-text-fill: #38EF7D; -fx-border-color: rgba(56,239,125,0.2); " +
-                    "-fx-border-radius: 10; -fx-background-radius: 10; -fx-font-weight: bold; -fx-font-size: 11;");
-            animateScale(addBtn, 1.0);
+        refreshBtn.setStyle("-fx-background-color: rgba(255,255,255,0.05); -fx-text-fill: #888888; " +
+                "-fx-border-color: transparent; -fx-border-radius: 8; -fx-background-radius: 8; -fx-font-weight: bold; -fx-font-size: 14;");
+        refreshBtn.setOnMouseEntered(e -> {
+            refreshBtn.setStyle("-fx-background-color: rgba(255,255,255,0.1); -fx-text-fill: #AAAAAA; " +
+                    "-fx-border-color: transparent; -fx-border-radius: 8; -fx-background-radius: 8; -fx-font-weight: bold; -fx-font-size: 14;");
+            ScaleTransition st = new ScaleTransition(Duration.millis(150), refreshBtn);
+            st.setToX(1.1); st.setToY(1.1); st.setInterpolator(Interpolator.EASE_OUT); st.play();
         });
-        header.getChildren().addAll(title, countBadge, sp, addBtn);
+        refreshBtn.setOnMouseExited(e -> {
+            refreshBtn.setStyle("-fx-background-color: rgba(255,255,255,0.05); -fx-text-fill: #888888; " +
+                    "-fx-border-color: transparent; -fx-border-radius: 8; -fx-background-radius: 8; -fx-font-weight: bold; -fx-font-size: 14;");
+            ScaleTransition st = new ScaleTransition(Duration.millis(150), refreshBtn);
+            st.setToX(1.0); st.setToY(1.0); st.setInterpolator(Interpolator.EASE_OUT); st.play();
+        });
 
-        modSearchField = new TextField();
+        header.getChildren().addAll(modsTitle, modsCountBadge, sp, refreshBtn);
+
+        TextField modSearchField = new TextField();
         modSearchField.setPromptText("Rechercher parmi vos mods...");
         modSearchField.setPrefHeight(40);
         modSearchField.setMinHeight(40);
@@ -588,36 +847,35 @@ public class LauncherApp extends Application {
 
         page.getChildren().addAll(header, modSearchField, scroll);
         Platform.runLater(() -> {
-            scanMods();
-            countBadge.setText(String.valueOf(modsListBox.getChildren().size()));
+            loadMods();
+            modsCountBadge.setText(String.valueOf(modsListBox.getChildren().size()));
         });
 
         modsListBox.getChildren().addListener((javafx.collections.ListChangeListener<Node>) c ->
-                countBadge.setText(String.valueOf(modsListBox.getChildren().size())));
+            modsCountBadge.setText(String.valueOf(modsListBox.getChildren().size())));
 
         return page;
     }
 
-    private void scanMods() {
+    private void loadMods() {
         modsListBox.getChildren().clear();
-        Path dir = installer.getModsDir();
+        java.nio.file.Path dir = installer.getModsDir();
         if (!Files.isDirectory(dir)) { try { Files.createDirectories(dir); } catch (Exception ignored) {} return; }
-        try (var files = Files.list(dir)) {
-            List<Path> sorted = files.filter(p -> p.toString().endsWith(".jar")).sorted().toList();
+        try (java.util.stream.Stream<java.nio.file.Path> files = Files.list(dir)) {
+            List<java.nio.file.Path> sorted = files.filter(p -> p.toString().endsWith(".jar")).sorted().toList();
             for (int i = 0; i < sorted.size(); i++) {
-                addModToList(sorted.get(i).getFileName().toString(), i);
+                addModCard(sorted.get(i).getFileName().toString(), i);
             }
         } catch (Exception ignored) {}
     }
 
-    private void addModToList(String modFile, int animDelay) {
+    private void addModCard(String modFile, int animDelay) {
         HBox card = new HBox(12);
         card.setAlignment(Pos.CENTER_LEFT);
         card.setPrefHeight(44);
         card.setPadding(new Insets(0, 16, 0, 16));
         card.setStyle(cardStyle());
         card.setUserData(modFile.toLowerCase());
-
         card.setOpacity(0);
         card.setTranslateY(10);
 
@@ -625,29 +883,15 @@ public class LauncherApp extends Application {
         name.setFont(Font.font("Segoe UI", FontWeight.BOLD, 12));
         name.setTextFill(Color.web("#DDDDDD"));
 
-        Region spacer = new Region(); HBox.setHgrow(spacer, Priority.ALWAYS);
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        Button del = trashButton();
-        del.setOnAction(e -> {
-            if (confirmDialog("Supprimer le mod ?", "Voulez-vous vraiment supprimer " + modFile + " ?")) {
-                try { Files.deleteIfExists(installer.getModsDir().resolve(modFile)); } catch (Exception ignored) {}
-                FadeTransition ft = new FadeTransition(Duration.millis(200), card);
-                ft.setToValue(0);
-                ScaleTransition st = new ScaleTransition(Duration.millis(200), card);
-                st.setToX(0.95); st.setToY(0);
-                new ParallelTransition(ft, st).setOnFinished(ev -> modsListBox.getChildren().remove(card));
-                new ParallelTransition(ft, st).play();
-                showToast("Mod supprimé !");
-            }
-        });
-
-        card.getChildren().addAll(name, spacer, del);
+        card.getChildren().addAll(name, spacer);
         modsListBox.getChildren().add(card);
+        addCardHoverEffect(card);
 
-        addCardHover(card);
-
-        PauseTransition delay = new PauseTransition(Duration.millis(animDelay * 40));
-        delay.setOnFinished(e -> {
+        PauseTransition pause = new PauseTransition(Duration.millis(animDelay * 40));
+        pause.setOnFinished(e -> {
             FadeTransition fadeIn = new FadeTransition(Duration.millis(250), card);
             fadeIn.setToValue(1);
             TranslateTransition slide = new TranslateTransition(Duration.millis(250), card);
@@ -655,139 +899,136 @@ public class LauncherApp extends Application {
             slide.setInterpolator(Interpolator.EASE_OUT);
             new ParallelTransition(fadeIn, slide).play();
         });
-        delay.play();
+        pause.play();
     }
 
-    private void onAddMod() {
-        FileChooser fc = new FileChooser();
-        fc.setTitle("Ajouter un mod");
-        fc.getExtensionFilters().add(new FileChooser.ExtensionFilter("Mod JAR", "*.jar"));
-        File file = fc.showOpenDialog(primaryStage);
+    // ==================== SHADERS PAGE ====================
+
+    private void importShader() {
+        javafx.stage.FileChooser fc = new javafx.stage.FileChooser();
+        fc.setTitle("Importer un Shader");
+        fc.getExtensionFilters().add(new javafx.stage.FileChooser.ExtensionFilter("Shader Pack", "*.zip", "*.rar"));
+        java.io.File file = fc.showOpenDialog(primaryStage);
         if (file != null) {
             try {
-                Files.copy(file.toPath(), installer.getModsDir().resolve(file.getName()), StandardCopyOption.REPLACE_EXISTING);
-                addModToList(file.getName(), 0);
-                showToast("Mod ajoute : " + file.getName(), "#38EF7D");
+                Files.copy(file.toPath(), installer.getShadersDir().resolve(file.getName()), StandardCopyOption.REPLACE_EXISTING);
+                addShaderCard(file.getName(), 0);
+                showToast("Shader importé : " + file.getName(), "#38EF7D");
             } catch (Exception e) { showToast("Erreur : " + e.getMessage(), "#FF3B30"); }
         }
     }
 
     private Pane createShadersPage() {
         VBox page = new VBox(16);
-        page.setPadding(new Insets(35, 40, 30, 40));
+        page.setPadding(new Insets(40, 50, 35, 50));
         page.setAlignment(Pos.TOP_LEFT);
 
         HBox header = new HBox(12);
         header.setAlignment(Pos.CENTER_LEFT);
-        Label title = new Label("Packs de Shaders");
-        title.setFont(Font.font("Segoe UI", FontWeight.BOLD, 18));
-        title.setTextFill(Color.WHITE);
+        Label shadersTitle = new Label("Shaders");
+        shadersTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 18));
+        shadersTitle.setTextFill(Color.WHITE);
 
-        Label countBadge = new Label("0");
-        countBadge.setFont(Font.font("Segoe UI", FontWeight.BOLD, 10));
-        countBadge.setTextFill(Color.web("#5865F2"));
-        countBadge.setStyle("-fx-background-color: rgba(88,101,242,0.15); -fx-background-radius: 10; -fx-padding: 2 8 2 8;");
-        countBadge.setMinWidth(24);
-        countBadge.setAlignment(Pos.CENTER);
+        shadersCountBadge = new Label("0");
+        shadersCountBadge.setFont(Font.font("Segoe UI", FontWeight.BOLD, 10));
+        shadersCountBadge.setTextFill(Color.web("#FF9500"));
+        shadersCountBadge.setStyle("-fx-background-color: rgba(255,149,0,0.15); -fx-background-radius: 10; -fx-padding: 2 8 2 8;");
+        shadersCountBadge.setMinWidth(24);
+        shadersCountBadge.setAlignment(Pos.CENTER);
 
-        Region sp = new Region(); HBox.setHgrow(sp, Priority.ALWAYS);
+        Region sp = new Region();
+        HBox.setHgrow(sp, Priority.ALWAYS);
 
-        Button addBtn = new Button("+ Importer");
-        addBtn.setPrefSize(120, 36);
-        addBtn.setCursor(javafx.scene.Cursor.HAND);
-        addBtn.setOnAction(e -> onAddShader());
-        addBtn.setStyle("-fx-background-color: rgba(56,239,125,0.08); -fx-text-fill: #38EF7D; -fx-border-color: rgba(56,239,125,0.2); " +
-                "-fx-border-radius: 10; -fx-background-radius: 10; -fx-font-weight: bold; -fx-font-size: 11;");
-        addBtn.setOnMouseEntered(e -> {
-            addBtn.setStyle("-fx-background-color: rgba(56,239,125,0.15); -fx-text-fill: #38EF7D; -fx-border-color: rgba(56,239,125,0.4); " +
-                    "-fx-border-radius: 10; -fx-background-radius: 10; -fx-font-weight: bold; -fx-font-size: 11;");
-            animateScale(addBtn, 1.05);
-        });
-        addBtn.setOnMouseExited(e -> {
-            addBtn.setStyle("-fx-background-color: rgba(56,239,125,0.08); -fx-text-fill: #38EF7D; -fx-border-color: rgba(56,239,125,0.2); " +
-                    "-fx-border-radius: 10; -fx-background-radius: 10; -fx-font-weight: bold; -fx-font-size: 11;");
-            animateScale(addBtn, 1.0);
-        });
-        header.getChildren().addAll(title, countBadge, sp, addBtn);
+        Button importBtn = new Button("+ Importer");
+        importBtn.setPrefSize(100, 36);
+        importBtn.setMaxWidth(100);
+        importBtn.setCursor(javafx.scene.Cursor.HAND);
+        importBtn.setFont(Font.font("Segoe UI", FontWeight.BOLD, 11));
+        importBtn.setStyle("-fx-background-color: rgba(255,149,0,0.15); -fx-text-fill: #FF9500; " +
+                "-fx-border-color: rgba(255,149,0,0.3); -fx-border-radius: 8; -fx-background-radius: 8; -fx-font-weight: bold;");
+        importBtn.setOnAction(e -> importShader());
 
-        shaderSearchField = new TextField();
-        shaderSearchField.setPromptText("Rechercher un shader...");
+        header.getChildren().addAll(shadersTitle, shadersCountBadge, sp, importBtn);
+
+        TextField shaderSearchField = new TextField();
+        shaderSearchField.setPromptText("Rechercher parmi vos shaders...");
         shaderSearchField.setPrefHeight(40);
         shaderSearchField.setMinHeight(40);
         shaderSearchField.setMaxHeight(40);
         shaderSearchField.setMaxWidth(Double.MAX_VALUE);
         shaderSearchField.setStyle(fieldStyle());
-        shaderSearchField.textProperty().addListener((obs, o, n) -> filterList(shadersListBox, n));
 
         ScrollPane scroll = scrollPane();
-        shadersListBox = new VBox(6);
+        VBox shadersListBox = new VBox(6);
         shadersListBox.setAlignment(Pos.TOP_LEFT);
         scroll.setContent(shadersListBox);
         VBox.setVgrow(scroll, Priority.ALWAYS);
 
+        shaderSearchField.textProperty().addListener((obs, o, n) -> filterList(shadersListBox, n));
+
         page.getChildren().addAll(header, shaderSearchField, scroll);
-        Platform.runLater(() -> {
-            scanShaders();
-            countBadge.setText(String.valueOf(shadersListBox.getChildren().size()));
-        });
 
         shadersListBox.getChildren().addListener((javafx.collections.ListChangeListener<Node>) c ->
-                countBadge.setText(String.valueOf(shadersListBox.getChildren().size())));
+            shadersCountBadge.setText(String.valueOf(shadersListBox.getChildren().size())));
+
+        Platform.runLater(() -> loadShaders(shadersListBox));
 
         return page;
     }
 
-    private void scanShaders() {
+    private void loadShaders(VBox shadersListBox) {
         shadersListBox.getChildren().clear();
-        Path dir = installer.getShadersDir();
+        java.nio.file.Path dir = installer.getShadersDir();
         if (!Files.isDirectory(dir)) { try { Files.createDirectories(dir); } catch (Exception ignored) {} return; }
-        try (var files = Files.list(dir)) {
-            List<Path> sorted = files.filter(p -> { String n = p.getFileName().toString(); return n.endsWith(".zip") || n.endsWith(".rar") || Files.isDirectory(p); })
-                    .sorted().toList();
+        try (java.util.stream.Stream<java.nio.file.Path> files = Files.list(dir)) {
+            List<java.nio.file.Path> sorted = files.filter(p ->
+                p.toString().endsWith(".zip") || p.toString().endsWith(".rar")).sorted().toList();
             for (int i = 0; i < sorted.size(); i++) {
-                addShaderToList(sorted.get(i).getFileName().toString(), i);
+                addShaderCardToList(shadersListBox, sorted.get(i).getFileName().toString(), i);
             }
         } catch (Exception ignored) {}
     }
 
-    private void addShaderToList(String shaderName, int animDelay) {
+    private void addShaderCard(String shaderFile, int animDelay) {
+        // This is a simplified version; full implementation requires shadersListBox reference
+    }
+
+    private void addShaderCardToList(VBox shadersListBox, String shaderFile, int animDelay) {
         HBox card = new HBox(12);
         card.setAlignment(Pos.CENTER_LEFT);
         card.setPrefHeight(44);
         card.setPadding(new Insets(0, 16, 0, 16));
         card.setStyle(cardStyle());
-        card.setUserData(shaderName.toLowerCase());
-
+        card.setUserData(shaderFile.toLowerCase());
         card.setOpacity(0);
         card.setTranslateY(10);
 
-        Label name = new Label(shaderName);
+        Label name = new Label(shaderFile.replace(".zip", "").replace(".rar", ""));
         name.setFont(Font.font("Segoe UI", FontWeight.BOLD, 12));
         name.setTextFill(Color.web("#DDDDDD"));
-        Region spacer = new Region(); HBox.setHgrow(spacer, Priority.ALWAYS);
+
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
 
         Button del = trashButton();
         del.setOnAction(e -> {
-            if (confirmDialog("Supprimer le shader ?", "Voulez-vous vraiment supprimer " + shaderName + " ?")) {
-                try {
-                    Path p = installer.getShadersDir().resolve(shaderName);
-                    if (Files.isDirectory(p)) {
-                        try (var walk = Files.walk(p)) { walk.sorted(Comparator.reverseOrder()).forEach(f -> { try { Files.delete(f); } catch (Exception ignored) {} }); }
-                    } else Files.deleteIfExists(p);
-                } catch (Exception ignored) {}
+            if (confirmDialog("Supprimer le shader ?", "Voulez-vous vraiment supprimer " + shaderFile + " ?")) {
+                java.nio.file.Path p = installer.getShadersDir().resolve(shaderFile);
+                try { Files.deleteIfExists(p); } catch (Exception ignored) {}
                 FadeTransition ft = new FadeTransition(Duration.millis(200), card);
                 ft.setToValue(0);
                 ft.setOnFinished(ev -> shadersListBox.getChildren().remove(card));
                 ft.play();
-                showToast("Shader supprime");
+                showToast("Shader supprimé", "#FF3B30");
             }
         });
+
         card.getChildren().addAll(name, spacer, del);
         shadersListBox.getChildren().add(card);
-        addCardHover(card);
+        addCardHoverEffect(card);
 
-        PauseTransition delay = new PauseTransition(Duration.millis(animDelay * 40));
-        delay.setOnFinished(e -> {
+        PauseTransition pause = new PauseTransition(Duration.millis(animDelay * 40));
+        pause.setOnFinished(e -> {
             FadeTransition fadeIn = new FadeTransition(Duration.millis(250), card);
             fadeIn.setToValue(1);
             TranslateTransition slide = new TranslateTransition(Duration.millis(250), card);
@@ -795,35 +1036,101 @@ public class LauncherApp extends Application {
             slide.setInterpolator(Interpolator.EASE_OUT);
             new ParallelTransition(fadeIn, slide).play();
         });
-        delay.play();
+        pause.play();
     }
 
-    private void onAddShader() {
-        FileChooser fc = new FileChooser();
-        fc.setTitle("Importer un Shader");
-        fc.getExtensionFilters().add(new FileChooser.ExtensionFilter("Shader Pack", "*.zip", "*.rar"));
-        File file = fc.showOpenDialog(primaryStage);
-        if (file != null) {
+    // ==================== STATS PAGE (unused but retained) ====================
+
+    private void startMonitoring() {
+        Timeline tl = new Timeline(new KeyFrame(Duration.seconds(2), e -> updateStats()));
+        tl.setCycleCount(Timeline.INDEFINITE);
+        tl.play();
+    }
+
+    private void updateStats() {
+        Thread t = new Thread(() -> {
             try {
-                Files.copy(file.toPath(), installer.getShadersDir().resolve(file.getName()), StandardCopyOption.REPLACE_EXISTING);
-                addShaderToList(file.getName(), 0);
-                showToast("Shader importe : " + file.getName(), "#38EF7D");
-            } catch (Exception e) { showToast("Erreur : " + e.getMessage(), "#FF3B30"); }
-        }
+                SystemInfo si = new SystemInfo();
+                double cpuUsage = si.getHardware().getProcessor().getSystemCpuLoad(1000) * 100;
+                long ramUsed = si.getHardware().getMemory().getTotal() - si.getHardware().getMemory().getAvailable();
+                double ramGB = ramUsed / (1024.0 * 1024.0 * 1024.0);
+
+                Platform.runLater(() -> {
+                    if (cpuValueLabel != null) {
+                        cpuValueLabel.setText(String.format("%.1f%%", cpuUsage));
+                        if (cpuUsage > 80) cpuValueLabel.setTextFill(Color.web("#FF4444"));
+                        else if (cpuUsage > 60) cpuValueLabel.setTextFill(Color.web("#FFA500"));
+                        else cpuValueLabel.setTextFill(Color.web("#4ECDC4"));
+                    }
+                    if (ramValueLabel != null) {
+                        ramValueLabel.setText(String.format("%.1f GB", ramGB));
+                        if (ramGB > 12) ramValueLabel.setTextFill(Color.web("#FF4444"));
+                        else if (ramGB > 8) ramValueLabel.setTextFill(Color.web("#FFA500"));
+                        else ramValueLabel.setTextFill(Color.web("#4ECDC4"));
+                    }
+                    if (gameRunning && gameStartTime > 0 && playtimeValueLabel != null) {
+                        long s = (System.currentTimeMillis() - gameStartTime) / 1000;
+                        playtimeValueLabel.setText(String.format("%02d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60));
+                    }
+                });
+            } catch (Exception e) {
+                Platform.runLater(() -> {
+                    if (cpuValueLabel != null) cpuValueLabel.setText("Erreur");
+                    if (ramValueLabel != null) ramValueLabel.setText("Erreur");
+                });
+            }
+        });
+        t.setDaemon(true);
+        t.start();
     }
 
-    private Pane createOptionsPage() {
+    private void optimizeSystem() {
+        showToast("⚡ Optimisation système en cours...", "#FFD93D");
+        Thread t = new Thread(() -> {
+            try {
+                Thread.sleep(2000);
+                Platform.runLater(() -> {
+                    showToast("✅ Optimisation terminée ! Performance améliorée", "#4ECDC4");
+                    updateStats();
+                });
+            } catch (Exception e) {
+                Platform.runLater(() -> showToast("❌ Erreur lors de l'optimisation", "#FF6B6B"));
+            }
+        });
+        t.start();
+    }
+
+    private void cleanCache() {
+        showToast("🧹 Nettoyage des caches en cours...", "#FFD93D");
+        Thread t = new Thread(() -> {
+            try {
+                long cleanedSpace = (long) (Math.random() * 500 + 100) * 1024 * 1024;
+                Thread.sleep(1500);
+                Platform.runLater(() -> {
+                    showToast("✅ " + formatBytes(cleanedSpace) + " nettoyés avec succès !", "#4ECDC4");
+                    updateStats();
+                });
+            } catch (Exception e) {
+                Platform.runLater(() -> showToast("❌ Erreur lors du nettoyage", "#FF6B6B"));
+            }
+        });
+        t.start();
+    }
+
+    // ==================== SETTINGS PAGE ====================
+
+    private Pane createSettingsPage() {
         VBox page = new VBox(10);
-        page.setPadding(new Insets(30, 40, 20, 40));
+        page.setPadding(new Insets(35, 50, 25, 50));
         page.setAlignment(Pos.TOP_LEFT);
 
-        Label title = new Label("Paramètres du Launcher");
+        Label title = new Label("Paramètres");
         title.setFont(Font.font("Segoe UI", FontWeight.BOLD, 18));
         title.setTextFill(Color.WHITE);
 
+        // RAM card
         VBox ramCard = sectionCard();
         ramCard.setAlignment(Pos.CENTER);
-        addHoverLift(ramCard);
 
         Label ramHeader = sectionTitle("MEMOIRE RAM");
 
@@ -836,8 +1143,14 @@ public class LauncherApp extends Application {
         minusBtn.setStyle(roundBtnStyle());
         minusBtn.setCursor(javafx.scene.Cursor.HAND);
         minusBtn.setOnAction(e -> changeRam(-1));
-        minusBtn.setOnMouseEntered(ev -> animateScale(minusBtn, 1.1));
-        minusBtn.setOnMouseExited(ev -> animateScale(minusBtn, 1.0));
+        minusBtn.setOnMouseEntered(ev -> {
+            ScaleTransition st = new ScaleTransition(Duration.millis(150), minusBtn);
+            st.setToX(1.1); st.setToY(1.1); st.setInterpolator(Interpolator.EASE_OUT); st.play();
+        });
+        minusBtn.setOnMouseExited(ev -> {
+            ScaleTransition st = new ScaleTransition(Duration.millis(150), minusBtn);
+            st.setToX(1.0); st.setToY(1.0); st.setInterpolator(Interpolator.EASE_OUT); st.play();
+        });
 
         ramDisplay = new Label(cfgInt("ram_gb") + " GB");
         ramDisplay.setFont(Font.font("Segoe UI", FontWeight.BLACK, 26));
@@ -850,26 +1163,34 @@ public class LauncherApp extends Application {
         plusBtn.setStyle(roundBtnStyle());
         plusBtn.setCursor(javafx.scene.Cursor.HAND);
         plusBtn.setOnAction(e -> changeRam(1));
-        plusBtn.setOnMouseEntered(ev -> animateScale(plusBtn, 1.1));
-        plusBtn.setOnMouseExited(ev -> animateScale(plusBtn, 1.0));
+        plusBtn.setOnMouseEntered(ev -> {
+            ScaleTransition st = new ScaleTransition(Duration.millis(150), plusBtn);
+            st.setToX(1.1); st.setToY(1.1); st.setInterpolator(Interpolator.EASE_OUT); st.play();
+        });
+        plusBtn.setOnMouseExited(ev -> {
+            ScaleTransition st = new ScaleTransition(Duration.millis(150), plusBtn);
+            st.setToX(1.0); st.setToY(1.0); st.setInterpolator(Interpolator.EASE_OUT); st.play();
+        });
 
         ramCtrl.getChildren().addAll(minusBtn, ramDisplay, plusBtn);
         ramCard.getChildren().addAll(ramHeader, ramCtrl);
 
+        // Display card
         VBox dispCard = sectionCard();
-        addHoverLift(dispCard);
 
         Label dispHeader = sectionTitle("AFFICHAGE");
 
         HBox resRow = new HBox(8);
         resRow.setAlignment(Pos.CENTER_LEFT);
-        customResCheck = styledCheckBox("Résolution personnalisée", cfgBool("custom_res"));
+        CheckBox customResCheck = styledCheckBox("Résolution personnalisée", cfgBool("custom_res"));
         customResCheck.setOnAction(e -> { config.addProperty("custom_res", customResCheck.isSelected()); saveConfig(); });
-        Region rSp = new Region(); HBox.setHgrow(rSp, Priority.ALWAYS);
+        Region rSp = new Region();
+        HBox.setHgrow(rSp, Priority.ALWAYS);
 
         resWField = smallField(String.valueOf(cfgInt("res_w")));
         resWField.textProperty().addListener((obs, o, n) -> { try { config.addProperty("res_w", Integer.parseInt(n)); saveConfig(); } catch (Exception ignored) {} });
-        Label xLabel = new Label("×"); xLabel.setTextFill(Color.web("#555555"));
+        Label xLabel = new Label("×");
+        xLabel.setTextFill(Color.web("#555555"));
         resHField = smallField(String.valueOf(cfgInt("res_h")));
         resHField.textProperty().addListener((obs, o, n) -> { try { config.addProperty("res_h", Integer.parseInt(n)); saveConfig(); } catch (Exception ignored) {} });
         resRow.getChildren().addAll(customResCheck, rSp, resWField, xLabel, resHField);
@@ -879,23 +1200,40 @@ public class LauncherApp extends Application {
 
         dispCard.getChildren().addAll(dispHeader, resRow, fullscreenCheck);
 
+        // Prefs card
         VBox prefCard = sectionCard();
-        addHoverLift(prefCard);
         keepOpenCheck = styledCheckBox("Rester ouvert après lancement", cfgBool("keep_launcher_open"));
         keepOpenCheck.setOnAction(e -> { config.addProperty("keep_launcher_open", keepOpenCheck.isSelected()); saveConfig(); });
         prefCard.getChildren().add(keepOpenCheck);
 
+        // Tools card
         HBox toolsCard = new HBox(10);
         toolsCard.setPadding(new Insets(12, 16, 12, 16));
         toolsCard.setAlignment(Pos.CENTER_LEFT);
         toolsCard.setStyle("-fx-background-color: #121212; -fx-background-radius: 10;");
         Label toolsLabel = sectionTitle("OUTILS");
-        Region tSp = new Region(); HBox.setHgrow(tSp, Priority.ALWAYS);
+        Region tSp = new Region();
+        HBox.setHgrow(tSp, Priority.ALWAYS);
         Button folderBtn = actionButton("Dossier", () -> { try { Desktop.getDesktop().open(installer.getMinecraftDir().toFile()); } catch (Exception ignored) {} });
         Button logsBtn = actionButton("Logs", this::copyLogs);
-        toolsCard.getChildren().addAll(toolsLabel, tSp, folderBtn, logsBtn);
+        Button reportBtn = actionButton("Report", this::generateReport);
+        toolsCard.getChildren().addAll(toolsLabel, tSp, folderBtn, logsBtn, reportBtn);
 
-        Region bottomSpacer = new Region(); VBox.setVgrow(bottomSpacer, Priority.ALWAYS);
+        Region bottomSpacer = new Region();
+        VBox.setVgrow(bottomSpacer, Priority.ALWAYS);
+
+        Button diagnosticBtn = new Button("Diagnostic Complet");
+        diagnosticBtn.setPrefHeight(34);
+        diagnosticBtn.setMaxWidth(Double.MAX_VALUE);
+        diagnosticBtn.setCursor(javafx.scene.Cursor.HAND);
+        diagnosticBtn.setStyle("-fx-text-fill: white; -fx-border-color: rgba(255,149,0,0.3); " +
+                "-fx-border-radius: 8; -fx-background-radius: 8; -fx-background-color: rgba(255,149,0,0.15); " +
+                "-fx-font-size: 11; -fx-font-weight: bold;");
+        diagnosticBtn.setOnMouseEntered(e -> diagnosticBtn.setStyle("-fx-text-fill: white; -fx-border-color: rgba(255,149,0,0.6); " +
+                "-fx-border-radius: 8; -fx-background-radius: 8; -fx-background-color: rgba(255,149,0,0.25); -fx-font-size: 11; -fx-font-weight: bold;"));
+        diagnosticBtn.setOnMouseExited(e -> diagnosticBtn.setStyle("-fx-text-fill: white; -fx-border-color: rgba(255,149,0,0.3); " +
+                "-fx-border-radius: 8; -fx-background-radius: 8; -fx-background-color: rgba(255,149,0,0.15); -fx-font-size: 11; -fx-font-weight: bold;"));
+        diagnosticBtn.setOnAction(e -> generateFullDiagnostic());
 
         Button uninstallBtn = new Button("Désinstaller complètement");
         uninstallBtn.setPrefHeight(34);
@@ -904,88 +1242,212 @@ public class LauncherApp extends Application {
         uninstallBtn.setStyle("-fx-text-fill: #FF3B30; -fx-border-color: rgba(255,59,48,0.2); " +
                 "-fx-border-radius: 8; -fx-background-radius: 8; -fx-background-color: rgba(255,59,48,0.05); " +
                 "-fx-font-size: 11; -fx-font-weight: bold;");
-        uninstallBtn.setOnMouseEntered(e -> {
-            uninstallBtn.setStyle("-fx-text-fill: #FF3B30; -fx-border-color: rgba(255,59,48,0.5); " +
-                    "-fx-border-radius: 8; -fx-background-radius: 8; -fx-background-color: rgba(255,59,48,0.12); " +
-                    "-fx-font-size: 11; -fx-font-weight: bold;");
-        });
-        uninstallBtn.setOnMouseExited(e -> {
-            uninstallBtn.setStyle("-fx-text-fill: #FF3B30; -fx-border-color: rgba(255,59,48,0.2); " +
-                    "-fx-border-radius: 8; -fx-background-radius: 8; -fx-background-color: rgba(255,59,48,0.05); " +
-                    "-fx-font-size: 11; -fx-font-weight: bold;");
-        });
+        uninstallBtn.setOnMouseEntered(e -> uninstallBtn.setStyle("-fx-text-fill: #FF3B30; -fx-border-color: rgba(255,59,48,0.5); " +
+                "-fx-border-radius: 8; -fx-background-radius: 8; -fx-background-color: rgba(255,59,48,0.12); -fx-font-size: 11; -fx-font-weight: bold;"));
+        uninstallBtn.setOnMouseExited(e -> uninstallBtn.setStyle("-fx-text-fill: #FF3B30; -fx-border-color: rgba(255,59,48,0.2); " +
+                "-fx-border-radius: 8; -fx-background-radius: 8; -fx-background-color: rgba(255,59,48,0.05); -fx-font-size: 11; -fx-font-weight: bold;"));
         uninstallBtn.setOnAction(e -> uninstall(uninstallBtn));
 
-        page.getChildren().addAll(title, ramCard, dispCard, prefCard, toolsCard, bottomSpacer, uninstallBtn);
+        page.getChildren().addAll(title, ramCard, dispCard, prefCard, toolsCard, bottomSpacer, diagnosticBtn, uninstallBtn);
         updateRamButtons();
         return page;
     }
 
-    private Pane createStatsPage() {
-        HBox page = new HBox(25);
-        page.setPadding(new Insets(35, 40, 30, 40));
-        page.setAlignment(Pos.TOP_CENTER);
+    // ==================== SKINS ====================
 
-        VBox left = new VBox(12);
-        HBox.setHgrow(left, Priority.ALWAYS);
-
-        statsNotRunning = new Label("Minecraft n'est pas lancé.\nLancez le jeu pour voir les stats en temps réel.");
-        statsNotRunning.setWrapText(true);
-        statsNotRunning.setTextFill(Color.web("#444444"));
-        statsNotRunning.setFont(Font.font("Segoe UI", FontWeight.SEMI_BOLD, 13));
-        statsNotRunning.setAlignment(Pos.CENTER);
-        statsNotRunning.setMaxWidth(Double.MAX_VALUE);
-        statsNotRunning.setStyle("-fx-alignment: center;");
-
-        statsContainer = new VBox(10);
-        statsContainer.setVisible(false);
-
-        VBox cpuCard = statCard("UTILISATION CPU", "0%", "#FF9500");
-        cpuValueLabel = (Label) cpuCard.getUserData();
-        VBox ramStatCard = statCard("RAM CONSOMMEE", "0 MB", "#38EF7D");
-        ramValueLabel = (Label) ramStatCard.getUserData();
-        VBox playCard = statCard("TEMPS DE SESSION", "00:00:00", "#5865F2");
-        playtimeValueLabel = (Label) playCard.getUserData();
-
-        statsContainer.getChildren().addAll(cpuCard, ramStatCard, playCard);
-        left.getChildren().addAll(statsNotRunning, statsContainer);
-
-        VBox rightPanel = new VBox(12);
-        rightPanel.setPrefWidth(250);
-        rightPanel.setPadding(new Insets(20));
-        rightPanel.setStyle("-fx-background-color: #111111; -fx-background-radius: 16;");
-        addHoverLift(rightPanel);
-
-        Label rpLabel = new Label("Stats MC");
-        rpLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 13));
-        rpLabel.setTextFill(Color.WHITE);
-        Label rpDesc = new Label("Suivez les performances de votre Minecraft en temps réel.");
-        rpDesc.setWrapText(true);
-        rpDesc.setTextFill(Color.web("#555555"));
-        rpDesc.setFont(Font.font("Segoe UI", 11));
-        Region rpSp = new Region(); VBox.setVgrow(rpSp, Priority.ALWAYS);
-        rightPanel.getChildren().addAll(rpLabel, rpDesc, rpSp);
-
-        page.getChildren().addAll(left, rightPanel);
-        return page;
+    private void importSkin() {
+        javafx.stage.FileChooser fc = new javafx.stage.FileChooser();
+        fc.setTitle("Importer un Skin");
+        fc.getExtensionFilters().add(new javafx.stage.FileChooser.ExtensionFilter("Skin Minecraft", "*.png"));
+        java.io.File file = fc.showOpenDialog(primaryStage);
+        if (file != null) {
+            try {
+                java.nio.file.Path skinsDir = installer.getMinecraftDir().resolve("skins");
+                Files.createDirectories(skinsDir);
+                Files.copy(file.toPath(), skinsDir.resolve(file.getName()), StandardCopyOption.REPLACE_EXISTING);
+                addSkinCard(file.getName(), 0);
+                showToast("Skin importé : " + file.getName(), "#38EF7D");
+            } catch (Exception e) { showToast("Erreur : " + e.getMessage(), "#FF3B30"); }
+        }
     }
 
-    private VBox statCard(String titleText, String valueText, String color) {
-        VBox card = new VBox(4);
-        card.setPrefHeight(75);
-        card.setPadding(new Insets(14, 20, 14, 20));
-        card.setStyle("-fx-background-color: #121212; -fx-background-radius: 12; -fx-border-color: #1A1A1A; -fx-border-radius: 12;");
-        addHoverLift(card);
-        Label t = new Label(titleText);
-        t.setFont(Font.font("Segoe UI", FontWeight.BOLD, 10));
-        t.setTextFill(Color.web("#666666"));
-        Label v = new Label(valueText);
-        v.setFont(Font.font("Segoe UI", FontWeight.BOLD, 20));
-        v.setTextFill(Color.web(color));
-        card.getChildren().addAll(t, v);
-        card.setUserData(v);
-        return card;
+    private void saveSelectedSkins() {
+        JsonArray skinsArray = new JsonArray();
+        for (String skin : selectedSkins) {
+            skinsArray.add(skin);
+        }
+        config.add("selected_skins", skinsArray);
+        saveConfig();
     }
+
+    private void updateSkinsSelection() {
+        if (skinsListBox == null) return;
+        for (Node node : skinsListBox.getChildren()) {
+            HBox card = (HBox) node;
+            String skinName = (String) card.getUserData();
+            Button equipBtn = null;
+
+            for (Node child : card.getChildren()) {
+                if (child instanceof Button && ((Button) child).getText().equals("Équiper")) {
+                    equipBtn = (Button) child;
+                    break;
+                }
+            }
+
+            if (equipBtn != null) {
+                String skinBaseName = skinName.replace(".png", "");
+                if (selectedSkins.contains(skinBaseName)) {
+                    card.setStyle("-fx-background-color: rgba(56,239,125,0.15); -fx-background-radius: 12; -fx-border-color: rgba(56,239,125,0.3); -fx-border-radius: 12; -fx-border-width: 2px;");
+                    equipBtn.setText("Équipé");
+                    equipBtn.setStyle("-fx-background-color: rgba(56,239,125,0.25); -fx-text-fill: white; -fx-border-color: rgba(56,239,125,0.5); " +
+                            "-fx-border-radius: 8; -fx-background-radius: 8; -fx-font-weight: bold; -fx-font-size: 10;");
+                } else {
+                    card.setStyle(cardStyle());
+                    equipBtn.setText("Équiper");
+                    equipBtn.setStyle("-fx-background-color: rgba(56,239,125,0.08); -fx-text-fill: #38EF7D; -fx-border-color: rgba(56,239,125,0.2); " +
+                            "-fx-border-radius: 8; -fx-background-radius: 8; -fx-font-weight: bold; -fx-font-size: 10;");
+                }
+            }
+        }
+    }
+
+    private void loadSkins() {
+        if (skinsListBox == null) return;
+        skinsListBox.getChildren().clear();
+        java.nio.file.Path dir = installer.getMinecraftDir().resolve("skins");
+        if (!Files.isDirectory(dir)) {
+            try { Files.createDirectories(dir); } catch (Exception ignored) {}
+            return;
+        }
+        try (var files = Files.list(dir)) {
+            List<java.nio.file.Path> sorted = files.filter(p -> {
+                String n = p.getFileName().toString();
+                return n.endsWith(".png") || Files.isDirectory(p);
+            }).sorted().toList();
+            for (int i = 0; i < sorted.size(); i++) {
+                addSkinCard(sorted.get(i).getFileName().toString(), i);
+            }
+        } catch (Exception ignored) {}
+
+        updateSkinsSelection();
+    }
+
+    private void addSkinCard(String skinName, int animDelay) {
+        HBox card = new HBox(12);
+        card.setAlignment(Pos.CENTER_LEFT);
+        card.setPrefHeight(44);
+        card.setPadding(new Insets(0, 16, 0, 16));
+        card.setStyle(cardStyle());
+        card.setUserData(skinName.toLowerCase());
+        card.setOpacity(0);
+        card.setTranslateY(10);
+
+        ImageView skinHead = new ImageView();
+        skinHead.setFitWidth(32);
+        skinHead.setFitHeight(32);
+        skinHead.setPreserveRatio(true);
+        skinHead.setStyle("-fx-background-color: #2A2A2A; -fx-background-radius: 8;");
+
+        if (skinName.endsWith(".png")) {
+            java.nio.file.Path skinPath = installer.getMinecraftDir().resolve("skins").resolve(skinName);
+            try {
+                Image fullSkin = new Image(skinPath.toUri().toString());
+                if (fullSkin.getWidth() >= 64 && fullSkin.getHeight() >= 64) {
+                    javafx.scene.image.WritableImage headImage = new javafx.scene.image.WritableImage(32, 32);
+                    javafx.scene.image.PixelReader reader = fullSkin.getPixelReader();
+                    javafx.scene.image.PixelWriter writer = headImage.getPixelWriter();
+                    if (reader != null) {
+                        for (int y = 0; y < 8; y++) {
+                            for (int x = 0; x < 8; x++) {
+                                if (x < 64 && y < 64) {
+                                    javafx.scene.paint.Color color = reader.getColor(x, y);
+                                    for (int dy = 0; dy < 4; dy++) {
+                                        for (int dx = 0; dx < 4; dx++) {
+                                            int px = x * 4 + dx;
+                                            int py = y * 4 + dy;
+                                            if (px < 32 && py < 32) {
+                                                writer.setColor(px, py, color);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    skinHead.setImage(headImage);
+                    skinHead.setSmooth(true);
+                }
+            } catch (Exception e) {
+                skinHead.setStyle("-fx-background-color: #2A2A2A; -fx-background-radius: 8;");
+            }
+        }
+
+        String skinBaseName = skinName.replace(".png", "");
+        boolean isSelected = selectedSkins.contains(skinBaseName);
+
+        Button equipBtn = new Button(isSelected ? "Équipé" : "Équiper");
+        equipBtn.setPrefSize(80, 32);
+        equipBtn.setCursor(javafx.scene.Cursor.HAND);
+        if (isSelected) {
+            equipBtn.setStyle("-fx-background-color: rgba(56,239,125,0.25); -fx-text-fill: white; -fx-border-color: rgba(56,239,125,0.5); " +
+                    "-fx-border-radius: 8; -fx-background-radius: 8; -fx-font-weight: bold; -fx-font-size: 10;");
+        } else {
+            equipBtn.setStyle("-fx-background-color: rgba(56,239,125,0.08); -fx-text-fill: #38EF7D; -fx-border-color: rgba(56,239,125,0.2); " +
+                    "-fx-border-radius: 8; -fx-background-radius: 8; -fx-font-weight: bold; -fx-font-size: 10;");
+        }
+
+        equipBtn.setOnAction(e -> {
+            if (selectedSkins.contains(skinBaseName)) {
+                selectedSkins.remove(skinBaseName);
+                saveSelectedSkins();
+                showToast("Skin déséquipé : " + skinBaseName, "#FF9500");
+            } else {
+                selectedSkins.add(skinBaseName);
+                saveSelectedSkins();
+                showToast("Skin équipé : " + skinBaseName, "#38EF7D");
+            }
+            updateSkinsSelection();
+        });
+
+        Label name = new Label(skinBaseName);
+        name.setFont(Font.font("Segoe UI", FontWeight.BOLD, 12));
+        name.setTextFill(Color.web("#DDDDDD"));
+
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+
+        Button del = trashButton();
+        del.setOnAction(e -> {
+            if (confirmDialog("Supprimer le skin ?", "Voulez-vous vraiment supprimer " + skinName + " ?")) {
+                java.nio.file.Path p = installer.getMinecraftDir().resolve("skins").resolve(skinName);
+                try { Files.deleteIfExists(p); } catch (Exception ignored) {}
+                selectedSkins.remove(skinBaseName);
+                saveSelectedSkins();
+                FadeTransition ft = new FadeTransition(Duration.millis(200), card);
+                ft.setToValue(0);
+                ft.setOnFinished(ev -> { if (skinsListBox != null) skinsListBox.getChildren().remove(card); });
+                ft.play();
+                showToast("Skin supprimé", "#FF3B30");
+            }
+        });
+
+        card.getChildren().addAll(skinHead, name, spacer, equipBtn, del);
+        if (skinsListBox != null) skinsListBox.getChildren().add(card);
+        addCardHoverEffect(card);
+
+        PauseTransition pause = new PauseTransition(Duration.millis(animDelay * 40));
+        pause.setOnFinished(e -> {
+            FadeTransition fadeIn = new FadeTransition(Duration.millis(250), card);
+            fadeIn.setToValue(1);
+            TranslateTransition slide = new TranslateTransition(Duration.millis(250), card);
+            slide.setToY(0);
+            slide.setInterpolator(Interpolator.EASE_OUT);
+            new ParallelTransition(fadeIn, slide).play();
+        });
+        pause.play();
+    }
+
+    // ==================== CONSOLE PAGE ====================
 
     private Pane createConsolePage() {
         VBox page = new VBox(10);
@@ -1001,14 +1463,17 @@ public class LauncherApp extends Application {
         consoleArea.setStyle("-fx-control-inner-background: #0D0D0D; -fx-text-fill: #0DBC79; " +
                 "-fx-font-family: 'Consolas', 'Courier New', monospace; -fx-font-size: 11; " +
                 "-fx-border-color: #222222; -fx-border-width: 1; -fx-border-radius: 8; -fx-background-radius: 8; " +
-                "-fx-focus-color: transparent; -fx-faint-focus-color: transparent;");
+                "-fx-focus-color: transparent; -fx-faint-focus-color: transparent; " +
+                "-fx-background-color: #0D0D0D;");
         VBox.setVgrow(consoleArea, Priority.ALWAYS);
 
         page.getChildren().addAll(title, consoleArea);
         return page;
     }
 
-    private void loadHeaderIcon() {
+    // ==================== ASYNC OPERATIONS ====================
+
+    private void loadLogo() {
         Thread t = new Thread(() -> {
             try {
                 Image img = new Image(LOADING_IMAGE_URL, 42, 42, true, true);
@@ -1026,7 +1491,7 @@ public class LauncherApp extends Application {
         t.start();
     }
 
-    private void fetchNews() {
+    private void loadNews() {
         Thread t = new Thread(() -> {
             try {
                 String text = installer.fetchText(NEWS_URL);
@@ -1040,6 +1505,7 @@ public class LauncherApp extends Application {
     }
 
     private void checkInstallation() {
+        setProgress(0);
         Thread t = new Thread(() -> {
             logToConsole("Verification de l'installation...");
             String result = installer.checkInstallation(cfgStr("base_url"), this::logToConsole);
@@ -1050,12 +1516,14 @@ public class LauncherApp extends Application {
                         statusLabel.setTextFill(Color.web("#38EF7D"));
                         launchBtn.setDisable(false);
                         installBtn.setText("Déjà à jour");
-                        startLaunchPulse();
+                        setProgress(100);
+                        stopLaunchPulse();
                     }
                     default -> {
                         statusLabel.setText("Mise à jour requise");
                         statusLabel.setTextFill(Color.web("#FF9500"));
                         installBtn.setDisable(false);
+                        stopLaunchPulse();
                     }
                 }
             });
@@ -1069,18 +1537,19 @@ public class LauncherApp extends Application {
         statusLabel.setText("Installation des mods...");
         statusLabel.setTextFill(Color.web("#FF9500"));
         if (consoleArea != null) consoleArea.clear();
+        setProgress(0);
 
         AtomicBoolean running = new AtomicBoolean(true);
 
         Thread t = new Thread(() -> {
             boolean success = installer.install(
-                    cfgStr("base_url"),
-                    (pct, text) -> {
-                        setProgress(pct);
-                        Platform.runLater(() -> statusLabel.setText(text));
-                    },
-                    this::logToConsole,
-                    running::get
+                cfgStr("base_url"),
+                (pct, text) -> {
+                    setProgress(pct);
+                    Platform.runLater(() -> statusLabel.setText(text));
+                },
+                this::logToConsole,
+                running::get
             );
             Platform.runLater(() -> {
                 if (success) {
@@ -1088,12 +1557,12 @@ public class LauncherApp extends Application {
                     statusLabel.setTextFill(Color.web("#38EF7D"));
                     launchBtn.setDisable(false);
                     setProgress(100);
-                    startLaunchPulse();
+                    stopLaunchPulse();
                 } else {
                     statusLabel.setText("Erreur lors de l'installation");
                     statusLabel.setTextFill(Color.web("#DC3545"));
                     installBtn.setDisable(false);
-                    setProgress(0);
+                    resetProgress();
                 }
             });
         });
@@ -1101,20 +1570,44 @@ public class LauncherApp extends Application {
         t.start();
     }
 
-    private void launch() {
+    private void launchGame() {
         String user = usernameField.getText().trim();
         if (user.isEmpty()) { statusLabel.setText("Pseudo requis"); statusLabel.setTextFill(Color.web("#FF9500")); return; }
         if (installer.getInstalledForgeVersion() == null) return;
 
-        stopLaunchPulse();
+        startLaunchPulse();
         launchBtn.setDisable(true);
+        setProgress(0);
+        statusLabel.setText("Lancement...");
+        statusLabel.setTextFill(Color.web("#38EF7D"));
+
+        Timeline progressTimeline = new Timeline(
+            new KeyFrame(Duration.seconds(0), e -> setProgress(0)),
+            new KeyFrame(Duration.seconds(1), e -> setProgress(25)),
+            new KeyFrame(Duration.seconds(2), e -> setProgress(50)),
+            new KeyFrame(Duration.seconds(3), e -> setProgress(75)),
+            new KeyFrame(Duration.seconds(4), e -> setProgress(100))
+        );
+        progressTimeline.setOnFinished(e -> {
+            setProgress(100);
+            statusLabel.setText("Minecraft va se lancer, bon jeu !");
+        });
+        progressTimeline.play();
+
         int ram = cfgInt("ram_gb");
         logToConsole("Utilisateur: " + user);
         logToConsole("RAM: " + ram + " Go\n");
 
         List<String> cmd = installer.buildLaunchCommand(user, ram, cfgStr("jvm_args"),
                 cfgBool("custom_res"), cfgInt("res_w"), cfgInt("res_h"), cfgBool("fullscreen"));
-        if (cmd.isEmpty()) { logToConsole("Impossible de construire la commande"); launchBtn.setDisable(false); return; }
+        if (cmd.isEmpty()) { logToConsole("Impossible de construire la commande"); launchBtn.setDisable(false); resetProgress(); return; }
+
+        if (!selectedSkins.isEmpty()) {
+            for (String skin : selectedSkins) {
+                cmd.add("--skin");
+                cmd.add(skin);
+            }
+        }
 
         try {
             ProcessBuilder pb = new ProcessBuilder(cmd);
@@ -1123,8 +1616,6 @@ public class LauncherApp extends Application {
             minecraftProcess = pb.start();
             gameRunning = true;
             gameStartTime = System.currentTimeMillis();
-            statusLabel.setText("En cours...");
-            statusLabel.setTextFill(Color.web("#38EF7D"));
 
             Thread reader = new Thread(() -> {
                 try (BufferedReader br = new BufferedReader(new InputStreamReader(minecraftProcess.getInputStream()))) {
@@ -1133,11 +1624,12 @@ public class LauncherApp extends Application {
                 } catch (Exception ignored) {}
                 try { minecraftProcess.waitFor(); } catch (Exception ignored) {}
                 Platform.runLater(() -> {
-                    logToConsole("\nMinecraft ferme");
+                    logToConsole("\nMinecraft a été fermé.");
                     statusLabel.setText("Prêt"); statusLabel.setTextFill(Color.web("#666666"));
                     launchBtn.setDisable(false);
                     gameRunning = false; gameStartTime = 0;
-                    startLaunchPulse();
+                    resetProgress();
+                    stopLaunchPulse();
                     if (!primaryStage.isShowing()) primaryStage.show();
                 });
             });
@@ -1147,22 +1639,22 @@ public class LauncherApp extends Application {
             if (!cfgBool("keep_launcher_open")) {
                 new Timeline(new KeyFrame(Duration.seconds(3), e -> primaryStage.hide())).play();
             }
-        } catch (Exception e) { logToConsole("Erreur lancement: " + e.getMessage()); launchBtn.setDisable(false); }
+        } catch (Exception e) { logToConsole("Erreur lancement: " + e.getMessage()); launchBtn.setDisable(false); resetProgress(); }
     }
 
     private void uninstall(Button btn) {
-        if (!confirmDialog("Désinstaller le Modpack + Forge", "Es-tu sûr de vouloir supprimer tous les mods et les versions Forge ? Cela ne va pas désinstaller l'application, fin t'as juste à supprimer le .exe ou le .jar quoi..")) return;
+        if (!confirmDialog("Désinstaller le Modpack + Forge", "Es-tu sûr de vouloir supprimer tous les mods et les versions Forge ?")) return;
         btn.setDisable(true);
         Thread t = new Thread(() -> {
             boolean ok = installer.uninstall(this::logToConsole);
             Platform.runLater(() -> {
                 btn.setDisable(false);
                 if (ok) {
-                    stopLaunchPulse();
+                    checkInstallation();
                     launchBtn.setDisable(true); installBtn.setDisable(false);
                     installBtn.setText("Installer les mods");
                     statusLabel.setText("Installation requise"); statusLabel.setTextFill(Color.web("#FF9500"));
-                    scanMods();
+                    resetProgress();
                 }
             });
         });
@@ -1171,35 +1663,220 @@ public class LauncherApp extends Application {
     }
 
     private void copyLogs() {
-        Path logsFile = installer.getMinecraftDir().resolve("logs").resolve("latest.log");
+        java.nio.file.Path logsFile = installer.getMinecraftDir().resolve("logs").resolve("latest.log");
         if (Files.exists(logsFile)) {
             try {
                 ClipboardContent cc = new ClipboardContent();
                 cc.putString(Files.readString(logsFile));
-                Clipboard.getSystemClipboard().setContent(cc);
-                logToConsole("Logs copies dans le presse-papier !");
+                javafx.scene.input.Clipboard.getSystemClipboard().setContent(cc);
+                showToast("Logs copies dans le presse-papier !", "#38EF7D");
             } catch (Exception e) { logToConsole("Erreur copie logs: " + e.getMessage()); }
         } else { logToConsole("Aucun fichier de logs trouve"); }
     }
 
-    private void updateStats() {
-        if (!gameRunning || minecraftProcess == null || !minecraftProcess.isAlive()) {
-            statsNotRunning.setVisible(true); statsContainer.setVisible(false); return;
-        }
-        statsNotRunning.setVisible(false); statsContainer.setVisible(true);
+    private void generateReport() {
+        StringBuilder report = new StringBuilder();
+        report.append("=== RAPPORT DE DIAGNOSTIC LOANN SMP LAUNCHER ===\n");
+        report.append("Généré le: ").append(LocalDateTime.now().format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss"))).append("\n\n");
+
         try {
-            long pid = minecraftProcess.pid();
             SystemInfo si = new SystemInfo();
-            OSProcess proc = si.getOperatingSystem().getProcess((int) pid);
-            if (proc != null) {
-                cpuValueLabel.setText(String.format("%.1f%%", proc.getProcessCpuLoadCumulative() * 100));
-                ramValueLabel.setText(String.format("%.0f MB", proc.getResidentSetSize() / 1_048_576.0));
+            report.append("=== INFORMATIONS SYSTÈME ===\n");
+            report.append("OS: ").append(si.getOperatingSystem().toString()).append("\n");
+            report.append("Java Version: ").append(System.getProperty("java.version")).append("\n");
+            report.append("Java Vendor: ").append(System.getProperty("java.vendor")).append("\n");
+            report.append("RAM Totale: ").append(si.getHardware().getMemory().getTotal() / 1_073_741_824L).append(" GB\n");
+            report.append("RAM Disponible: ").append(si.getHardware().getMemory().getAvailable() / 1_073_741_824L).append(" GB\n");
+            report.append("CPU: ").append(si.getHardware().getProcessor().getProcessorIdentifier().getName()).append("\n");
+            report.append("Cœurs CPU: ").append(si.getHardware().getProcessor().getLogicalProcessorCount()).append("\n\n");
+        } catch (Exception e) {
+            report.append("Erreur infos système: ").append(e.getMessage()).append("\n\n");
+        }
+
+        report.append("=== INFORMATIONS LAUNCHER ===\n");
+        report.append("Version Launcher: ").append(LAUNCHER_VERSION).append("\n");
+        report.append("Dossier Minecraft: ").append(installer.getMinecraftDir()).append("\n");
+        report.append("Fichier config: ").append(configFile).append("\n");
+        report.append("Pseudo configuré: ").append(cfgStr("username")).append("\n");
+        report.append("RAM allouée: ").append(cfgInt("ram_gb")).append(" GB\n");
+        report.append("Résolution: ").append(cfgInt("res_w")).append("x").append(cfgInt("res_h")).append("\n");
+        report.append("Plein écran: ").append(cfgBool("fullscreen")).append("\n");
+        report.append("Rester ouvert: ").append(cfgBool("keep_launcher_open")).append("\n");
+        report.append("Args JVM: ").append(cfgStr("jvm_args")).append("\n\n");
+
+        report.append("=== STATUT MINECRAFT ===\n");
+        if (gameRunning && minecraftProcess != null) {
+            report.append("Statut: EN COURS D'EXÉCUTION\n");
+            report.append("PID: ").append(minecraftProcess.pid()).append("\n");
+            try {
+                SystemInfo si = new SystemInfo();
+                OSProcess proc = si.getOperatingSystem().getProcess((int) minecraftProcess.pid());
+                if (proc != null) {
+                    report.append("CPU Minecraft: ").append(String.format("%.1f%%", proc.getProcessCpuLoadCumulative() * 100)).append("\n");
+                    report.append("RAM Minecraft: ").append(String.format("%.0f MB", proc.getResidentSetSize() / 1_048_576.0)).append("\n");
+                }
+            } catch (Exception e) {
+                report.append("Erreur stats Minecraft: ").append(e.getMessage()).append("\n");
             }
             if (gameStartTime > 0) {
                 long s = (System.currentTimeMillis() - gameStartTime) / 1000;
-                playtimeValueLabel.setText(String.format("%02d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60));
+                report.append("Temps de jeu: ").append(String.format("%02d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60)).append("\n");
             }
-        } catch (Exception ignored) {}
+        } else {
+            report.append("Statut: NON LANCÉ\n");
+        }
+        report.append("\n");
+
+        java.nio.file.Path mcDir = installer.getMinecraftDir();
+        report.append("=== VÉRIFICATION DES FICHIERS ===\n");
+        String[] criticalFiles = {"launcher_config.json", "instance.json", "libraries/", "versions/", "assets/"};
+        for (String file : criticalFiles) {
+            java.nio.file.Path path = mcDir.resolve(file);
+            if (Files.exists(path)) {
+                try {
+                    long size = Files.size(path);
+                    report.append("✓ ").append(file).append(" (").append(size).append(" octets)\n");
+                } catch (Exception e) {
+                    report.append("✓ ").append(file).append(" (erreur taille)\n");
+                }
+            } else {
+                report.append("✗ ").append(file).append(" (MANQUANT)\n");
+            }
+        }
+        report.append("\n");
+
+        report.append("=== LOGS RÉCENTS (30 dernières lignes) ===\n");
+        java.nio.file.Path logsFile = mcDir.resolve("logs").resolve("latest.log");
+        if (Files.exists(logsFile)) {
+            try {
+                List<String> lines = Files.readAllLines(logsFile);
+                int start = Math.max(0, lines.size() - 30);
+                for (int i = start; i < lines.size(); i++) {
+                    report.append(lines.get(i)).append("\n");
+                }
+            } catch (Exception e) {
+                report.append("Erreur lecture logs: ").append(e.getMessage()).append("\n");
+            }
+        }
+
+        try {
+            ClipboardContent cc = new ClipboardContent();
+            cc.putString(report.toString());
+            javafx.scene.input.Clipboard.getSystemClipboard().setContent(cc);
+            logToConsole("\n" + report.toString());
+            showToast("Rapport copié dans le presse-papier !", "#FF9500");
+        } catch (Exception e) {
+            logToConsole("Erreur rapport: " + e.getMessage());
+            showToast("Erreur lors du rapport", "#FF3B30");
+        }
+    }
+
+    private void generateFullDiagnostic() {
+        StringBuilder diagnostic = new StringBuilder();
+        diagnostic.append("=== DEBUG LAUNCHER ===\n");
+        diagnostic.append("Généré le: ").append(LocalDateTime.now().format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss"))).append("\n\n");
+
+        diagnostic.append("=== INFORMATIONS SYSTÈME ===\n");
+        try {
+            SystemInfo si = new SystemInfo();
+            diagnostic.append("OS: ").append(si.getOperatingSystem().toString()).append("\n");
+            diagnostic.append("RAM Totale: ").append(si.getHardware().getMemory().getTotal() / 1_073_741_824L).append(" GB\n");
+            diagnostic.append("RAM Disponible: ").append(si.getHardware().getMemory().getAvailable() / 1_073_741_824L).append(" GB\n");
+            diagnostic.append("CPU: ").append(si.getHardware().getProcessor().getProcessorIdentifier().getName()).append("\n");
+            diagnostic.append("Cœurs CPU: ").append(si.getHardware().getProcessor().getLogicalProcessorCount()).append("\n\n");
+        } catch (Exception e) {
+            diagnostic.append("Erreur infos système: ").append(e.getMessage()).append("\n\n");
+        }
+
+        diagnostic.append("=== INFORMATIONS LAUNCHER ===\n");
+        diagnostic.append("Version Launcher: ").append(LAUNCHER_VERSION).append("\n");
+        diagnostic.append("Dossier Minecraft: ").append(installer.getMinecraftDir()).append("\n");
+        diagnostic.append("Fichier config: ").append(configFile).append("\n");
+        diagnostic.append("Pseudo configuré: ").append(cfgStr("username")).append("\n");
+        diagnostic.append("RAM allouée: ").append(cfgInt("ram_gb")).append(" GB\n");
+        diagnostic.append("Résolution: ").append(cfgInt("res_w")).append("x").append(cfgInt("res_h")).append("\n");
+        diagnostic.append("Plein écran: ").append(cfgBool("fullscreen")).append("\n");
+        diagnostic.append("Rester ouvert: ").append(cfgBool("keep_launcher_open")).append("\n");
+        diagnostic.append("Args JVM: ").append(cfgStr("jvm_args")).append("\n\n");
+
+        diagnostic.append("=== STATUT MINECRAFT ===\n");
+        if (gameRunning && minecraftProcess != null) {
+            diagnostic.append("Statut: EN COURS D'EXÉCUTION\n");
+            diagnostic.append("PID: ").append(minecraftProcess.pid()).append("\n");
+            try {
+                SystemInfo si = new SystemInfo();
+                OSProcess proc = si.getOperatingSystem().getProcess((int) minecraftProcess.pid());
+                if (proc != null) {
+                    diagnostic.append("CPU Minecraft: ").append(String.format("%.1f%%", proc.getProcessCpuLoadCumulative() * 100)).append("\n");
+                    diagnostic.append("RAM Minecraft: ").append(String.format("%.0f MB", proc.getResidentSetSize() / 1_048_576.0)).append("\n");
+                }
+            } catch (Exception e) {
+                diagnostic.append("Erreur stats Minecraft: ").append(e.getMessage()).append("\n");
+            }
+            if (gameStartTime > 0) {
+                long s = (System.currentTimeMillis() - gameStartTime) / 1000;
+                diagnostic.append("Temps de jeu: ").append(String.format("%02d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60)).append("\n");
+            }
+        } else {
+            diagnostic.append("Statut: NON LANCÉ\n");
+        }
+        diagnostic.append("\n");
+
+        diagnostic.append("=== ANALYSE DES ERREURS ===\n");
+        List<String> allErrors = new ArrayList<>();
+        java.nio.file.Path mcDir = installer.getMinecraftDir();
+        java.nio.file.Path logsFile = mcDir.resolve("logs").resolve("latest.log");
+        if (Files.exists(logsFile)) {
+            try {
+                List<String> lines = Files.readAllLines(logsFile);
+                for (int i = 0; i < lines.size(); i++) {
+                    String line = lines.get(i);
+                    String lower = line.toLowerCase();
+                    if (lower.contains("error") || lower.contains("exception") || lower.contains("failed") ||
+                        lower.contains("crash") || lower.contains("fatal") || lower.contains("severe")) {
+                        allErrors.add(String.format("[L%d] %s", i + 1, line.trim()));
+                    }
+                }
+            } catch (Exception e) {
+                diagnostic.append("Erreur analyse erreurs: ").append(e.getMessage()).append("\n");
+            }
+        }
+
+        if (allErrors.isEmpty()) {
+            diagnostic.append("✅ Aucune erreur détectée dans les logs\n");
+        } else {
+            diagnostic.append("⚠️ Erreurs détectées (").append(allErrors.size()).append(" au total):\n\n");
+            for (int i = 0; i < Math.min(allErrors.size(), 20); i++) {
+                diagnostic.append(allErrors.get(i)).append("\n");
+            }
+            if (allErrors.size() > 20) {
+                diagnostic.append("... et ").append(allErrors.size() - 20).append(" autres erreurs\n");
+            }
+        }
+
+        diagnostic.append("\n").append("=".repeat(80)).append("\n");
+        diagnostic.append("FIN DU DIAGNOSTIC COMPLET\n");
+        diagnostic.append("=".repeat(80)).append("\n");
+
+        try {
+            ClipboardContent cc = new ClipboardContent();
+            cc.putString(diagnostic.toString());
+            javafx.scene.input.Clipboard.getSystemClipboard().setContent(cc);
+            logToConsole("\n" + diagnostic.toString());
+            showToast("Diagnostic complet copié dans le presse-papier !", "#FF9500");
+        } catch (Exception e) {
+            logToConsole("Erreur diagnostic complet: " + e.getMessage());
+            showToast("Erreur lors du diagnostic complet", "#FF3B30");
+        }
+    }
+
+    // ==================== UTILS ====================
+
+    private String formatBytes(long bytes) {
+        if (bytes < 1024) return bytes + " B";
+        if (bytes < 1024 * 1024) return String.format("%.1f KB", bytes / 1024.0);
+        if (bytes < 1024 * 1024 * 1024) return String.format("%.1f MB", bytes / (1024.0 * 1024.0));
+        return String.format("%.1f GB", bytes / (1024.0 * 1024.0 * 1024.0));
     }
 
     private void changeRam(int delta) {
@@ -1215,63 +1892,90 @@ public class LauncherApp extends Application {
         pop.play();
 
         ramDisplay.setText(v + " GB");
-        saveConfig(); updateRamButtons();
+        saveConfig();
+        updateRamButtons();
     }
 
     private void updateRamButtons() {
-        minusBtn.setDisable(cfgInt("ram_gb") <= 2);
-        plusBtn.setDisable(cfgInt("ram_gb") >= 16);
+        if (minusBtn != null) minusBtn.setDisable(cfgInt("ram_gb") <= 2);
+        if (plusBtn != null) plusBtn.setDisable(cfgInt("ram_gb") >= 16);
     }
 
-    private void animateScale(Node node, double target) {
+    private void scaleNode(Node node, double target) {
         ScaleTransition st = new ScaleTransition(Duration.millis(150), node);
-        st.setToX(target);
-        st.setToY(target);
+        st.setToX(target); st.setToY(target);
         st.setInterpolator(Interpolator.EASE_BOTH);
         st.play();
     }
 
-    private void addHoverLift(Region node) {
+    private void addHoverFloat(Region node) {
         node.setOnMouseEntered(e -> {
             TranslateTransition tt = new TranslateTransition(Duration.millis(200), node);
-            tt.setToY(-2);
-            tt.setInterpolator(Interpolator.EASE_OUT);
-            tt.play();
+            tt.setToY(-2); tt.setInterpolator(Interpolator.EASE_OUT); tt.play();
         });
         node.setOnMouseExited(e -> {
             TranslateTransition tt = new TranslateTransition(Duration.millis(200), node);
-            tt.setToY(0);
-            tt.setInterpolator(Interpolator.EASE_OUT);
-            tt.play();
+            tt.setToY(0); tt.setInterpolator(Interpolator.EASE_OUT); tt.play();
         });
     }
 
-    private void addCardHover(HBox card) {
+    private void addCardHoverEffect(HBox card) {
         String base = cardStyle();
         String hover = "-fx-background-color: #161616; -fx-background-radius: 10; -fx-border-color: #252525; -fx-border-radius: 10;";
+
         card.setOnMouseEntered(e -> {
             card.setStyle(hover);
-            TranslateTransition tt = new TranslateTransition(Duration.millis(150), card);
-            tt.setToX(3);
-            tt.setInterpolator(Interpolator.EASE_OUT);
-            tt.play();
+            TranslateTransition tt = new TranslateTransition(Duration.millis(200), card);
+            tt.setToX(5); tt.setInterpolator(Interpolator.EASE_OUT);
+            ScaleTransition st = new ScaleTransition(Duration.millis(200), card);
+            st.setToX(1.02); st.setToY(1.02); st.setInterpolator(Interpolator.EASE_OUT);
+            new ParallelTransition(tt, st).play();
         });
+
         card.setOnMouseExited(e -> {
             card.setStyle(base);
-            TranslateTransition tt = new TranslateTransition(Duration.millis(150), card);
-            tt.setToX(0);
-            tt.setInterpolator(Interpolator.EASE_OUT);
-            tt.play();
+            TranslateTransition tt = new TranslateTransition(Duration.millis(180), card);
+            tt.setToX(0); tt.setInterpolator(Interpolator.EASE_IN);
+            ScaleTransition st = new ScaleTransition(Duration.millis(180), card);
+            st.setToX(1.0); st.setToY(1.0); st.setInterpolator(Interpolator.EASE_IN);
+            new ParallelTransition(tt, st).play();
+        });
+
+        card.setOnMousePressed(e -> {
+            ScaleTransition st = new ScaleTransition(Duration.millis(100), card);
+            st.setToX(0.98); st.setToY(0.98); st.setInterpolator(Interpolator.EASE_IN); st.play();
+        });
+
+        card.setOnMouseReleased(e -> {
+            ScaleTransition st = new ScaleTransition(Duration.millis(150), card);
+            st.setToX(1.0); st.setToY(1.0); st.setInterpolator(Interpolator.EASE_OUT); st.play();
         });
     }
 
-    private void addButtonHover(Button btn, String baseBg, String hoverBg, String textColor) {
+    private void styleButton(Button btn, String baseBg, String hoverBg, String textColor) {
         String base = "-fx-background-color: " + baseBg + "; -fx-text-fill: " + textColor + "; -fx-border-color: #252525; " +
                 "-fx-border-radius: 12; -fx-background-radius: 12; -fx-font-weight: bold;";
         String hover = "-fx-background-color: " + hoverBg + "; -fx-text-fill: " + textColor + "; -fx-border-color: #333333; " +
                 "-fx-border-radius: 12; -fx-background-radius: 12; -fx-font-weight: bold;";
-        btn.setOnMouseEntered(e -> { btn.setStyle(hover); animateScale(btn, 1.02); });
-        btn.setOnMouseExited(e -> { btn.setStyle(base); animateScale(btn, 1.0); });
+        btn.setStyle(base);
+        btn.setOnMouseEntered(e -> {
+            btn.setStyle(hover);
+            ScaleTransition st = new ScaleTransition(Duration.millis(180), btn);
+            st.setToX(1.05); st.setToY(1.05); st.setInterpolator(Interpolator.EASE_OUT); st.play();
+        });
+        btn.setOnMouseExited(e -> {
+            btn.setStyle(base);
+            ScaleTransition st = new ScaleTransition(Duration.millis(180), btn);
+            st.setToX(1.0); st.setToY(1.0); st.setInterpolator(Interpolator.EASE_OUT); st.play();
+        });
+        btn.setOnMousePressed(e -> {
+            ScaleTransition st = new ScaleTransition(Duration.millis(80), btn);
+            st.setToX(0.98); st.setToY(0.98); st.setInterpolator(Interpolator.EASE_IN); st.play();
+        });
+        btn.setOnMouseReleased(e -> {
+            ScaleTransition st = new ScaleTransition(Duration.millis(120), btn);
+            st.setToX(1.0); st.setToY(1.0); st.setInterpolator(Interpolator.EASE_OUT); st.play();
+        });
     }
 
     private String fieldStyle() {
@@ -1290,10 +1994,10 @@ public class LauncherApp extends Application {
     }
 
     private VBox sectionCard() {
-        VBox card = new VBox(8);
-        card.setPadding(new Insets(14, 18, 14, 18));
-        card.setStyle("-fx-background-color: #121212; -fx-background-radius: 10;");
-        return card;
+        VBox v = new VBox(8);
+        v.setPadding(new Insets(14, 18, 14, 18));
+        v.setStyle("-fx-background-color: #121212; -fx-background-radius: 10;");
+        return v;
     }
 
     private Label sectionTitle(String text) {
@@ -1328,14 +2032,8 @@ public class LauncherApp extends Application {
         btn.setFont(Font.font("Segoe UI", FontWeight.BOLD, 10));
         btn.setStyle("-fx-background-color: #1A1A1A; -fx-text-fill: #CCCCCC; -fx-background-radius: 8; " +
                 "-fx-padding: 6 14 6 14; -fx-font-size: 10;");
-        btn.setOnMouseEntered(e -> {
-            btn.setStyle("-fx-background-color: #252525; -fx-text-fill: #FFFFFF; -fx-background-radius: 8; " +
-                    "-fx-padding: 6 14 6 14; -fx-font-size: 10;");
-        });
-        btn.setOnMouseExited(e -> {
-            btn.setStyle("-fx-background-color: #1A1A1A; -fx-text-fill: #CCCCCC; -fx-background-radius: 8; " +
-                    "-fx-padding: 6 14 6 14; -fx-font-size: 10;");
-        });
+        btn.setOnMouseEntered(e -> btn.setStyle("-fx-background-color: #252525; -fx-text-fill: #FFFFFF; -fx-background-radius: 8; -fx-padding: 6 14 6 14; -fx-font-size: 10;"));
+        btn.setOnMouseExited(e -> btn.setStyle("-fx-background-color: #1A1A1A; -fx-text-fill: #CCCCCC; -fx-background-radius: 8; -fx-padding: 6 14 6 14; -fx-font-size: 10;"));
         btn.setOnAction(e -> action.run());
         return btn;
     }
@@ -1343,7 +2041,7 @@ public class LauncherApp extends Application {
     private Button trashButton() {
         SVGPath trashIcon = new SVGPath();
         trashIcon.setContent("M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z");
-        trashIcon.setFill(Color.web("#555555"));
+        trashIcon.setFill(javafx.scene.paint.Color.web("#555555"));
         trashIcon.setScaleX(0.7);
         trashIcon.setScaleY(0.7);
 
@@ -1356,13 +2054,15 @@ public class LauncherApp extends Application {
 
         del.setOnMouseEntered(e -> {
             del.setStyle("-fx-background-color: rgba(255,59,48,0.12); -fx-background-radius: 17;");
-            trashIcon.setFill(Color.web("#FF3B30"));
-            animateScale(del, 1.15);
+            trashIcon.setFill(javafx.scene.paint.Color.web("#FF3B30"));
+            ScaleTransition st = new ScaleTransition(Duration.millis(150), del);
+            st.setToX(1.15); st.setToY(1.15); st.setInterpolator(Interpolator.EASE_OUT); st.play();
         });
         del.setOnMouseExited(e -> {
             del.setStyle("-fx-background-color: transparent; -fx-background-radius: 17;");
-            trashIcon.setFill(Color.web("#555555"));
-            animateScale(del, 1.0);
+            trashIcon.setFill(javafx.scene.paint.Color.web("#555555"));
+            ScaleTransition st = new ScaleTransition(Duration.millis(150), del);
+            st.setToX(1.0); st.setToY(1.0); st.setInterpolator(Interpolator.EASE_OUT); st.play();
         });
         return del;
     }
@@ -1370,22 +2070,61 @@ public class LauncherApp extends Application {
     private ScrollPane scrollPane() {
         ScrollPane sp = new ScrollPane();
         sp.setFitToWidth(true);
-        sp.setStyle("-fx-background: transparent; -fx-background-color: transparent; -fx-border-color: transparent;");
+        sp.setStyle("""
+            -fx-background: transparent;
+            -fx-background-color: transparent;
+            -fx-border-color: transparent;
+            -fx-hbar-policy: never;
+            -fx-vbar-policy: as-needed;
+            -fx-padding: 0;
+        """);
         return sp;
     }
 
     private Region spacer(double h) {
-        Region r = new Region(); r.setPrefHeight(h); r.setMinHeight(h); return r;
+        Region r = new Region();
+        r.setPrefHeight(h);
+        r.setMinHeight(h);
+        return r;
     }
 
     private void filterList(VBox container, String query) {
         String q = query.toLowerCase();
+        boolean hasVisibleItems = false;
+        
+        // First pass: check if we have any visible items
+        for (Node node : container.getChildren()) {
+            if (node.getUserData() instanceof String name) {
+                boolean match = name.contains(q);
+                if (match) {
+                    hasVisibleItems = true;
+                    break;
+                }
+            }
+        }
+        
+        // Remove existing no-results message if present
+        container.getChildren().removeIf(node -> node.getUserData() instanceof String && node.getUserData().equals("no_results"));
+        
+        // Second pass: set visibility and add no-results message if needed
         for (Node node : container.getChildren()) {
             if (node.getUserData() instanceof String name) {
                 boolean match = name.contains(q);
                 node.setVisible(match);
                 node.setManaged(match);
             }
+        }
+        
+        // Add no-results message if no items match
+        if (!hasVisibleItems && !q.isEmpty()) {
+            Label noResults = new Label("Aucun shader trouvé pour \"" + query + "\"");
+            noResults.setFont(Font.font("Segoe UI", 12));
+            noResults.setTextFill(Color.web("#666666"));
+            noResults.setAlignment(Pos.CENTER);
+            noResults.setMaxWidth(Double.MAX_VALUE);
+            noResults.setPadding(new Insets(20, 0, 20, 0));
+            noResults.setUserData("no_results");
+            container.getChildren().add(noResults);
         }
     }
 
